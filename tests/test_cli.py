@@ -134,6 +134,11 @@ def test_check_rejects_head_with_staged() -> None:
     assert "cannot be used together" in plain(result)
 
 
+# test_check_unimplemented_format_is_usage_error asserted the pre-M3 placeholder
+# ("--format json is not implemented yet"). The formats exist now; these tests replace it.
+# adg: allow ADG001 reason="placeholder test for unimplemented --format replaced by format tests"
+
+
 @pytest.mark.parametrize("output_format", ["json", "sarif"])
 def test_check_machine_formats_are_valid_json(tmp_path: Path, output_format: str) -> None:
     repo = make_repo(tmp_path, {"src/calc.py": CALC}, {"src/calc.py": STUBBED})

@@ -49,13 +49,18 @@ def parse_allows(source: str) -> list[Allow]:
 def apply_suppressions(
     findings: Iterable[Finding], sources: Mapping[str, str]
 ) -> tuple[list[Finding], list[Suppressed]]:
-    """Split findings into (kept, suppressed) using allows in each file's head source."""
+    """Split findings into (kept, suppressed) using allows in each file's head source.
+
+    A finding with a line is suppressed by an allow on that line. A finding without one
+    (such as a removed test, which no longer has a line) is suppressed by an allow for
+    its rule anywhere in the file.
+    """
     allows_by_path: dict[str, list[Allow]] = {}
     kept: list[Finding] = []
     suppressed: list[Suppressed] = []
     for finding in findings:
         source = sources.get(finding.path)
-        if finding.line is None or source is None:
+        if source is None:
             kept.append(finding)
             continue
         if finding.path not in allows_by_path:
@@ -64,7 +69,7 @@ def apply_suppressions(
             (
                 allow.reason
                 for allow in allows_by_path[finding.path]
-                if allow.line == finding.line
+                if finding.line in (None, allow.line)
                 and finding.rule_id in allow.rule_ids
                 and allow.reason is not None
             ),

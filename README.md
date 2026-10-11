@@ -41,7 +41,8 @@ def legacy_hook(event):  # adg: allow ADG010 reason="kept for plugin API v1"
 ```
 
 A suppression without a non-empty reason suppresses nothing and is reported as ADG099.
-Every suppression is listed in the report.
+Every suppression is listed in the report. Findings without a line (a removed test) are
+suppressed by an allow for that rule anywhere in the file.
 
 ## Configuration
 

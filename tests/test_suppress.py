@@ -65,3 +65,20 @@ def test_apply_suppressions_needs_matching_line_rule_and_reason() -> None:
         Suppressed(findings[0], "kept for v1 API"),
         Suppressed(findings[1], "folded into a property test"),
     ]
+
+
+def test_file_level_findings_are_suppressed_by_an_allow_anywhere_in_the_file() -> None:
+    source = (
+        'import x\n\n# adg: allow ADG001 reason="placeholder replaced"\n'
+        "y = 1  # adg: allow ADG001\n"
+    )
+    removed = finding("ADG001", None, "tests/test_a.py")
+    other_rule = finding("ADG003", None, "tests/test_a.py")
+    on_a_line = finding("ADG001", 1, "tests/test_a.py")
+
+    kept, suppressed = apply_suppressions(
+        [removed, other_rule, on_a_line], {"tests/test_a.py": source}
+    )
+
+    assert kept == [other_rule, on_a_line]
+    assert suppressed == [Suppressed(removed, "placeholder replaced")]
