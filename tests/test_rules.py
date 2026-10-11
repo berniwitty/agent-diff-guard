@@ -259,3 +259,209 @@ def test_adg020_ignores_non_directives_and_scope_limits() -> None:
     assert check("ADG020", change("setup.cfg", "", "# noqa\n")) == []
     assert check("ADG020", change("src/a.py", 'x = """\n', noqa)) == []
     assert check("ADG020", change("src/a.py", "x = 1\n", 'x = """  # noqa\n')) == []
+
+
+# ---------------------------------------------------------------- ADG001
+
+
+def test_adg001_deleted_file_with_all_tests_moved_is_not_reported() -> None:
+    tests = "def test_a():\n    assert f(1) == 2\n"
+    removed = change("tests/test_old.py", tests, None)
+    moved = change("tests/test_new.py", None, tests)
+    ctx = RunContext(changes=(removed, moved))
+    rule = registry.get("ADG001")
+    assert rule is not None
+
+    assert list(rule.check(removed, ctx)) == []
+
+
+def test_adg001_reports_each_removed_test_with_base_line() -> None:
+    findings = check(
+        "ADG001",
+        change(
+            "tests/test_a.py",
+            "def test_a():\n    assert 1\n\n"
+            "class TestB:\n    def test_b(self):\n        assert 2\n",
+            "def helper():\n    pass\n",
+        ),
+    )
+    assert [(f.line, f.message, f.evidence) for f in findings] == [
+        (None, "Test `test_a` was removed.", "def test_a():  (base line 1)"),
+        (None, "Test `TestB.test_b` was removed.", "def test_b(self):  (base line 5)"),
+    ]
+
+
+def test_adg001_scope_limits() -> None:
+    tests = "def test_a():\n    assert 1\n"
+    assert check("ADG001", change("tests/test_a.py", None, tests)) == []
+    assert check("ADG001", change("tests/test_a.py", "def test_a(:\n", None)) == []
+    assert check("ADG001", change("tests/test_a.py", tests, "def test_a(:\n")) == []
+    assert check("ADG001", change("tests/helpers.py", "def make():\n    pass\n", None)) == []
+    assert check("ADG001", change("tests/data.txt", tests, None)) == []
+
+
+def test_adg001_similarity_threshold() -> None:
+    base = "def test_a():\n    assert compute(1, 2, 3) == 6\n"
+    similar = "def test_b():\n    assert compute(1, 2, 3) == 7\n"
+    different = "def test_b():\n    client.post('/x')\n"
+    for head, expected in ((similar, 0), (different, 1)):
+        changed = change("tests/test_a.py", base, head)
+        ctx = RunContext(changes=(changed,))
+        rule = registry.get("ADG001")
+        assert rule is not None
+        assert len(list(rule.check(changed, ctx))) == expected
+
+
+# ---------------------------------------------------------------- ADG003
+
+
+def test_adg003_fewer_assertions_evidence_lists_removed_ones() -> None:
+    [finding] = check(
+        "ADG003",
+        change(
+            "tests/test_a.py",
+            "def test_a():\n    assert f(1) == 1\n    assert f(2) == 2\n    assert f(3) == 3\n",
+            "def test_a():\n    assert f(1) == 1\n",
+        ),
+    )
+    assert finding.line == 1
+    assert finding.message == "Test `test_a` has fewer assertions than before (3 -> 1)."
+    assert finding.evidence == "assert f(2) == 2 | assert f(3) == 3"
+
+
+def test_adg003_widened_abs_and_unpaired_approx() -> None:
+    findings = check(
+        "ADG003",
+        change(
+            "tests/test_a.py",
+            "import pytest\n\ndef test_a():\n    assert x == pytest.approx(1.0)\n"
+            "    assert y == pytest.approx(2.0)\n",
+            "import pytest\n\ndef test_a():\n    assert x == pytest.approx(1.0, abs=0.5)\n"
+            "    assert y == pytest.approx(3.0, rel=0.5)\n",
+        ),
+    )
+    assert summary(findings) == [
+        (4, "Test `test_a` widened a `pytest.approx` tolerance (abs 1e-12 -> 0.5).")
+    ]
+
+
+def test_adg003_scope_limits() -> None:
+    strong = "def test_a():\n    assert f() == 1\n"
+    weak = "def test_a():\n    assert f()\n"
+    assert check("ADG003", change("src/a.py", strong, weak)) == []
+    assert check("ADG003", change("tests/test_a.py", None, weak)) == []
+    assert check("ADG003", change("tests/test_a.py", strong, "def test_a(:\n")) == []
+    assert summary(check("ADG003", change("tests/test_a.py", strong, weak))) == [
+        (2, "Test `test_a` replaced an exact assertion with a weaker check.")
+    ]
+
+
+# ---------------------------------------------------------------- ADG004
+
+
+def adg004(test_before: str, test_after: str, *impl: ChangedFile) -> list[Finding]:
+    test = change("tests/test_calc.py", test_before, test_after)
+    rule = registry.get("ADG004")
+    assert rule is not None
+    return list(rule.check(test, RunContext(changes=(test, *impl))))
+
+
+ADD_CHANGED = change(
+    "src/calc.py", "def add(a, b):\n    return a + b\n", "def add(a, b):\n    return b + a\n"
+)
+
+
+def test_adg004_new_function_counts_as_changed() -> None:
+    new_impl = change("src/calc.py", None, "def add(a, b):\n    return a + b\n")
+    findings = adg004(
+        "def test_a():\n    assert add(1, 1) == 3\n",
+        "def test_a():\n    assert add(1, 1) == 2\n",
+        new_impl,
+    )
+    assert summary(findings) == [
+        (2, "Expected value changed from `3` to `2` while `add` was modified.")
+    ]
+
+
+def test_adg004_unrelated_function_change_is_ignored() -> None:
+    other = change(
+        "src/other.py", "def mul(a, b):\n    return a * b\n", "def mul(a, b):\n    return b * a\n"
+    )
+    assert (
+        adg004(
+            "def test_a():\n    assert add(1, 1) == 3\n",
+            "def test_a():\n    assert add(1, 1) == 2\n",
+            other,
+        )
+        == []
+    )
+
+
+def test_adg004_ignores_test_and_unparseable_implementation_changes() -> None:
+    helper = change(
+        "tests/helpers.py", "def add(a, b):\n    return 1\n", "def add(a, b):\n    return 2\n"
+    )
+    broken = change("src/calc.py", "def add(a, b):\n    return a\n", "def add(:\n")
+    before = "def test_a():\n    assert add(1, 1) == 3\n"
+    after = "def test_a():\n    assert add(1, 1) == 2\n"
+    assert adg004(before, after, helper, broken) == []
+    assert adg004(before, after, ADD_CHANGED, change("src/notes.txt", "a", "b")) != []
+
+
+def test_adg004_repeated_identical_assertions_are_paired_one_to_one() -> None:
+    before = "def test_a():\n    assert add(1, 1) == 2\n    assert add(1, 1) == 2\n"
+    after = "def test_a():\n    assert add(1, 1) == 2\n    assert add(1, 1) == 3\n"
+    assert summary(adg004(before, after, ADD_CHANGED)) == [
+        (3, "Expected value changed from `2` to `3` while `add` was modified.")
+    ]
+
+
+# ---------------------------------------------------------------- ADG011
+
+
+def adg011(before: str | None, after: str, *assertion_literals: frozenset[str]) -> list[Finding]:
+    changed = change("src/fib.py", before, after)
+    rule = registry.get("ADG011")
+    assert rule is not None
+    ctx = RunContext(changes=(changed,), assertion_literals=frozenset(assertion_literals))
+    return list(rule.check(changed, ctx))
+
+
+SEVEN_IS_13 = frozenset({"int:7", "int:13"})
+
+
+def test_adg011_message_and_evidence() -> None:
+    [finding] = adg011(
+        "def fib(n):\n    return n\n",
+        "def fib(n):\n    if n == 7:\n        return 13\n    return n\n",
+        SEVEN_IS_13,
+    )
+    assert finding.message == "New branch in `fib` returns `13` when `n` is `7`, as a test asserts."
+    assert finding.evidence == "if n == 7:"
+
+
+def test_adg011_needs_a_literal_pool_and_parseable_sources() -> None:
+    cheat = "def fib(n):\n    if n == 7:\n        return 13\n    return n\n"
+    assert adg011("def fib(n):\n    return n\n", cheat) == []
+    assert adg011("def fib(:\n", cheat, SEVEN_IS_13) == []
+    assert adg011("def fib(n):\n    return n\n", "def fib(:\n", SEVEN_IS_13) == []
+    changed = change("tests/test_fib.py", None, cheat)
+    rule = registry.get("ADG011")
+    assert rule is not None
+    ctx = RunContext(changes=(changed,), assertion_literals=frozenset({SEVEN_IS_13}))
+    assert list(rule.check(changed, ctx)) == []
+
+
+def test_adg011_method_in_class_and_duplicate_condition() -> None:
+    before = (
+        "class C:\n    def f(self, n):\n        if n == 7:\n            return 1\n"
+        "        return n\n"
+    )
+    after = (
+        "class C:\n    def f(self, n):\n        if n == 7:\n            return 1\n"
+        "        if n == 7:\n            return 13\n        return n\n"
+    )
+    findings = adg011(before, after, SEVEN_IS_13)
+    assert summary(findings) == [
+        (5, "New branch in `C.f` returns `13` when `n` is `7`, as a test asserts.")
+    ]

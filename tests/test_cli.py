@@ -11,6 +11,7 @@ from typer.testing import CliRunner, Result
 
 from agent_diff_guard import cli
 from agent_diff_guard.change import ChangedFile
+from agent_diff_guard.rules import registry
 from agent_diff_guard.rules.base import Finding, RuleRegistry, RunContext, Severity
 from tests.harness import git, make_repo
 
@@ -75,7 +76,7 @@ def test_check_reports_error_finding_and_exits_1(tmp_path: Path) -> None:
     assert plain(result).splitlines() == [
         "src/calc.py:1: error ADG010 Function `add` had real logic and now has a stub body.",
         "    return a + b -> pass",
-        "Checked 1 changed file(s) with 3 rule(s): 1 error, 0 warn, 0 info.",
+        f"Checked 1 changed file(s) with {len(registry.all())} rule(s): 1 error, 0 warn, 0 info.",
     ]
 
 

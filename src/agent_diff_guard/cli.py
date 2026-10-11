@@ -9,11 +9,11 @@ from typing import Annotated
 
 import typer
 
-from agent_diff_guard.engine import EXIT_USAGE, exit_code, run_rules
+from agent_diff_guard.engine import EXIT_USAGE, build_context, exit_code, run_rules
 from agent_diff_guard.git import DiffSpec, Git, GitError
 from agent_diff_guard.report import text
 from agent_diff_guard.rules import registry
-from agent_diff_guard.rules.base import RunContext, Severity
+from agent_diff_guard.rules.base import Severity
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -68,13 +68,13 @@ def check(
         raise typer.Exit(code=EXIT_USAGE)
     try:
         git = Git.discover(repo)
-        changes = git.changed_files(_diff_spec(git, base, head, staged))
+        ctx = build_context(git, _diff_spec(git, base, head, staged))
     except GitError as exc:
         _emit(f"adg check: {exc}", err=True)
         raise typer.Exit(code=EXIT_USAGE) from exc
     rules = registry.all()
-    findings = run_rules(rules, RunContext(changes=tuple(changes)))
-    _emit(text.render(findings, files_checked=len(changes), rules_run=len(rules)))
+    findings = run_rules(rules, ctx)
+    _emit(text.render(findings, files_checked=len(ctx.changes), rules_run=len(rules)))
     raise typer.Exit(code=exit_code(findings, fail_on))
 
 

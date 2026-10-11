@@ -1,0 +1,14 @@
+{
+  "findings": [
+    {
+      "rule_id": "ADG011",
+      "path": "src/fib.py",
+      "line": 2
+    },
+    {
+      "rule_id": "ADG011",
+      "path": "src/fib.py",
+      "line": 4
+    }
+  ]
+}

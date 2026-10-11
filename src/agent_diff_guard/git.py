@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -12,6 +13,7 @@ from agent_diff_guard.change import ChangedFile, FileStatus, all_lines, parse_hu
 ZERO_SHA = "0" * 40
 # Submodules (gitlinks) and symlinks have no source text to analyse.
 _SKIPPED_MODES = frozenset({"160000", "120000"})
+_REGULAR_FILE_MODES = frozenset({"100644", "100755"})
 _STATUS = {
     "A": FileStatus.ADDED,
     "C": FileStatus.ADDED,
@@ -134,6 +136,54 @@ class Git:
             changes.extend(self._untracked())
         return sorted(changes, key=lambda change: change.path)
 
+    def head_sources(self, spec: DiffSpec, select: Callable[[str], bool]) -> dict[str, str]:
+        """Text of every file at the head of ``spec``, changed or not, that ``select`` accepts."""
+        if spec.head_kind is HeadKind.WORKTREE:
+            out = self.run("ls-files", "--cached", "--others", "--exclude-standard", "-z")
+            sources = {}
+            for path in sorted({_decode_path(raw) for raw in out.split(b"\0") if raw}):
+                file = self.root / path
+                if select(path) and file.is_file() and not file.is_symlink():
+                    sources[path] = _decode(file.read_bytes())
+            return sources
+        if spec.head_kind is HeadKind.COMMIT:
+            assert spec.head is not None
+            # records look like "<mode> <type> <sha>\t<path>"
+            listing = self.run("ls-tree", "-r", "-z", "--full-tree", spec.head)
+            sha_field = 2
+        else:
+            # records look like "<mode> <sha> <stage>\t<path>"
+            listing = self.run("ls-files", "--stage", "-z")
+            sha_field = 1
+        wanted = {}
+        for record in filter(None, listing.split(b"\0")):
+            meta, raw_path = record.split(b"\t", 1)
+            fields = meta.decode("ascii").split(" ")
+            path = _decode_path(raw_path)
+            if fields[0] in _REGULAR_FILE_MODES and select(path):
+                wanted[path] = fields[sha_field]
+        blobs = self._blobs(wanted.values())
+        return {path: _decode(blobs[sha]) for path, sha in sorted(wanted.items())}
+
+    def _blobs(self, shas: Iterable[str]) -> dict[str, bytes]:
+        """Read many blobs with one ``git cat-file --batch`` process."""
+        ordered = sorted(set(shas))
+        if not ordered:
+            return {}
+        out = _run(self.root, ["cat-file", "--batch"], stdin="".join(f"{s}\n" for s in ordered))
+        blobs = {}
+        pos = 0
+        for sha in ordered:
+            header_end = out.index(b"\n", pos)
+            header = out[pos:header_end].decode("ascii").split(" ")
+            if len(header) != 3 or header[1] != "blob":
+                raise GitError(f"cannot read blob {sha}: {' '.join(header)}")
+            start = header_end + 1
+            end = start + int(header[2])
+            blobs[sha] = out[start:end]
+            pos = end + 1
+        return blobs
+
     def _rev_args(self, spec: DiffSpec) -> list[str]:
         if spec.head_kind is HeadKind.COMMIT:
             assert spec.head is not None
@@ -206,9 +256,10 @@ class Git:
         return changes
 
 
-def _run(cwd: Path, args: list[str]) -> bytes:
+def _run(cwd: Path, args: list[str], stdin: str | None = None) -> bytes:
+    data = stdin.encode("ascii") if stdin is not None else None
     try:
-        proc = subprocess.run(["git", *args], cwd=cwd, capture_output=True, check=False)
+        proc = subprocess.run(["git", *args], cwd=cwd, input=data, capture_output=True, check=False)
     except FileNotFoundError as exc:
         raise GitError("git executable not found on PATH") from exc
     if proc.returncode != 0:
