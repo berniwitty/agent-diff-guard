@@ -1,7 +1,15 @@
 from __future__ import annotations
 
-from agent_diff_guard.report.text import render
+from agent_diff_guard.engine import Outcome
+from agent_diff_guard.report import text
+from agent_diff_guard.rules import registry
 from agent_diff_guard.rules.base import Finding, Severity
+
+
+def render(findings: list[Finding], files_checked: int, rules_run: int) -> str:
+    rules = tuple(registry.all()[:rules_run])
+    assert len(rules) == rules_run
+    return text.render(Outcome(tuple(findings), (), files_checked, rules))
 
 
 def test_render_findings_with_and_without_line_and_evidence() -> None:

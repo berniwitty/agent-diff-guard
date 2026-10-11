@@ -165,6 +165,16 @@ class Git:
         blobs = self._blobs(wanted.values())
         return {path: _decode(blobs[sha]) for path, sha in sorted(wanted.items())}
 
+    def read_at(self, rev: str, path: str) -> str | None:
+        """Text of ``path`` at commit ``rev``, or ``None`` if no such file exists there."""
+        listing = self.run("--literal-pathspecs", "ls-tree", "-z", rev, "--", path)
+        if not listing:
+            return None
+        mode, kind, sha = listing.split(b"\t", 1)[0].decode("ascii").split(" ")
+        if kind != "blob" or mode not in _REGULAR_FILE_MODES:
+            return None
+        return _decode(self._blobs([sha])[sha])
+
     def _blobs(self, shas: Iterable[str]) -> dict[str, bytes]:
         """Read many blobs with one ``git cat-file --batch`` process."""
         ordered = sorted(set(shas))

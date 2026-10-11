@@ -3,15 +3,25 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from enum import StrEnum
+from importlib import resources
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
-from agent_diff_guard.engine import EXIT_USAGE, build_context, exit_code, run_rules
+from agent_diff_guard.config import ConfigError
+from agent_diff_guard.engine import (
+    EXIT_USAGE,
+    Outcome,
+    build_context,
+    evaluate,
+    exit_code,
+    load_config,
+)
 from agent_diff_guard.git import DiffSpec, Git, GitError
-from agent_diff_guard.report import text
+from agent_diff_guard.report import json, markdown, sarif, text
 from agent_diff_guard.rules import registry
 from agent_diff_guard.rules.base import Severity
 
@@ -27,6 +37,14 @@ class OutputFormat(StrEnum):
     JSON = "json"
     SARIF = "sarif"
     MARKDOWN = "markdown"
+
+
+RENDERERS: dict[OutputFormat, Callable[[Outcome], str]] = {
+    OutputFormat.TEXT: text.render,
+    OutputFormat.JSON: json.render,
+    OutputFormat.SARIF: sarif.render,
+    OutputFormat.MARKDOWN: markdown.render,
+}
 
 
 @app.command()
@@ -46,8 +64,12 @@ def check(
         OutputFormat, typer.Option("--format", help="Report format.")
     ] = OutputFormat.TEXT,
     fail_on: Annotated[
-        Severity, typer.Option("--fail-on", help="Lowest severity that makes the exit code 1.")
-    ] = Severity.ERROR,
+        Severity | None,
+        typer.Option(
+            "--fail-on",
+            help="Lowest severity that makes the exit code 1 [default: config fail-on, or error].",
+        ),
+    ] = None,
     repo: Annotated[
         Path, typer.Option("--repo", help="Path inside the git repository to check.")
     ] = Path("."),
@@ -55,7 +77,7 @@ def check(
     """Check a diff for shortcut patterns.
 
     With no options, checks uncommitted changes (staged, unstaged and untracked)
-    against HEAD.
+    against HEAD. Configuration is read from pyproject.toml at the base revision.
     """
     if staged and base is not None:
         raise typer.BadParameter("--base and --staged cannot be used together.")
@@ -63,19 +85,19 @@ def check(
         raise typer.BadParameter("--head and --staged cannot be used together.")
     if head is not None and base is None:
         raise typer.BadParameter("--head requires --base.")
-    if output_format is not OutputFormat.TEXT:
-        typer.echo(f"adg check: --format {output_format} is not implemented yet.", err=True)
-        raise typer.Exit(code=EXIT_USAGE)
+    rules = registry.all()
     try:
         git = Git.discover(repo)
-        ctx = build_context(git, _diff_spec(git, base, head, staged))
-    except GitError as exc:
+        spec = _diff_spec(git, base, head, staged)
+        config = load_config(git, spec, (rule.id for rule in rules))
+        ctx = build_context(git, spec, config.test_patterns)
+    except (GitError, ConfigError) as exc:
         _emit(f"adg check: {exc}", err=True)
         raise typer.Exit(code=EXIT_USAGE) from exc
-    rules = registry.all()
-    findings = run_rules(rules, ctx)
-    _emit(text.render(findings, files_checked=len(ctx.changes), rules_run=len(rules)))
-    raise typer.Exit(code=exit_code(findings, fail_on))
+    outcome = evaluate(rules, ctx, config)
+    _emit(RENDERERS[output_format](outcome))
+    threshold = fail_on or config.fail_on or Severity.ERROR
+    raise typer.Exit(code=exit_code(outcome.findings, threshold))
 
 
 def _emit(message: str, err: bool = False) -> None:
@@ -116,4 +138,23 @@ def explain(rule_id: Annotated[str, typer.Argument(help="Rule ID, e.g. ADG003.")
     if rule is None:
         typer.echo(f"Unknown rule ID: {rule_id}", err=True)
         raise typer.Exit(code=EXIT_USAGE)
-    typer.echo(f"{rule.id} {rule.name} (default severity: {rule.default_severity})")
+    doc = rule_doc(rule.id)
+    if doc is None:
+        typer.echo(f"{rule.id} {rule.name} (default severity: {rule.default_severity})")
+        return
+    _emit(doc.rstrip("\n"))
+
+
+# Rule docs ship inside the wheel; in a source checkout they are read from docs/rules/.
+_PACKAGED_DOCS = "rule_docs"
+_SOURCE_DOCS = Path(__file__).resolve().parents[2] / "docs" / "rules"
+
+
+def rule_doc(rule_id: str) -> str | None:
+    packaged = resources.files("agent_diff_guard").joinpath(_PACKAGED_DOCS, f"{rule_id}.md")
+    if packaged.is_file():
+        return packaged.read_text(encoding="utf-8")
+    source = _SOURCE_DOCS / f"{rule_id}.md"
+    if source.is_file():
+        return source.read_text(encoding="utf-8")
+    return None
