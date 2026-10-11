@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 from agent_diff_guard.rules.base import registry
@@ -30,3 +31,17 @@ def test_every_fixture_case_has_expected_json() -> None:
         if not (case.root / "expected.json").is_file()
     ]
     assert missing == []
+
+
+def test_no_fixture_file_is_ignored_by_git() -> None:
+    """An ignored fixture file exists locally but not in CI's checkout, so the case
+    would test something different there (an ignored coverage.xml once made ADG040's
+    negative cases pass vacuously on CI)."""
+    ignored = subprocess.run(
+        ["git", "ls-files", "--others", "--ignored", "--exclude-standard", "--", "."],
+        cwd=FIXTURES_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.splitlines()
+    assert ignored == []
