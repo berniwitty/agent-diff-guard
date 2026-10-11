@@ -68,6 +68,23 @@ fail-on = "warn"                # --fail-on on the command line wins
 Configuration is read from `pyproject.toml` **at the base revision**, so a change cannot
 loosen the checks applied to itself. A new setting takes effect once it is merged.
 
+## Evaluation
+
+The benchmark needs no manual labelling (SPEC §6). Original commits from
+well-maintained projects are the negatives; `eval/inject.py` plants one shortcut per
+rule on top of each commit for the positives.
+
+```bash
+make eval-repos     # clone eval/repos.txt into eval/.repos/   (uv run python -m eval.fetch)
+make eval-commits   # pin candidate commits in eval/commits.txt (uv run python -m eval.select_commits NAME)
+make eval           # write eval/results/RESULTS.md           (uv run python -m eval.run)
+```
+
+Results: not run yet. They will be added here once the corpus is pinned.
+
+Injected shortcuts are more canonical than the shortcuts real agents take, so recall
+on them is an optimistic upper bound.
+
 ## Development
 
 ```bash

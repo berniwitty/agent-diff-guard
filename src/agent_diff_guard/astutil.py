@@ -205,6 +205,20 @@ def normalized_body(node: FunctionNode) -> str:
     return "\n".join(ast.unparse(stmt) for stmt in body_without_docstring(node))
 
 
+@dataclass(frozen=True)
+class BodyShape:
+    """What a test does: its normalised body and the literal values it checks."""
+
+    body: str
+    literals: frozenset[str]
+
+
+def body_shape(node: FunctionNode) -> BodyShape:
+    statements = body_without_docstring(node)
+    literals = frozenset().union(*(literal_keys(stmt) for stmt in statements))
+    return BodyShape(normalized_body(node), literals)
+
+
 def fingerprint(node: ast.AST) -> str:
     """Structural identity of a node, ignoring positions, formatting and comments."""
     return ast.dump(node)

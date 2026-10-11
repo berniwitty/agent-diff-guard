@@ -8,7 +8,14 @@ from enum import StrEnum
 from functools import cached_property
 from typing import Protocol
 
-from agent_diff_guard.astutil import fingerprint, functions, normalized_body, parse, test_functions
+from agent_diff_guard.astutil import (
+    BodyShape,
+    body_shape,
+    fingerprint,
+    functions,
+    parse,
+    test_functions,
+)
 from agent_diff_guard.change import ChangedFile
 from agent_diff_guard.classify import DEFAULT_TEST_PATTERNS, is_python_file, is_test_file
 
@@ -60,9 +67,9 @@ class RunContext:
         return is_python_file(path) and not self.is_test_file(path)
 
     @cached_property
-    def new_test_bodies(self) -> tuple[str, ...]:
-        """Normalised bodies of test functions that are new anywhere in this diff."""
-        bodies: list[str] = []
+    def new_test_shapes(self) -> tuple[BodyShape, ...]:
+        """Shapes of test functions that are new anywhere in this diff."""
+        shapes: list[BodyShape] = []
         for change in self.changes:
             if not self.is_python_test(change.path):
                 continue
@@ -71,12 +78,12 @@ class RunContext:
                 continue
             base = parse(change.base_src)
             existing = test_functions(base) if base is not None else {}
-            bodies.extend(
-                normalized_body(node)
+            shapes.extend(
+                body_shape(node)
                 for qualname, node in test_functions(head).items()
                 if qualname not in existing
             )
-        return tuple(bodies)
+        return tuple(shapes)
 
     @cached_property
     def changed_function_names(self) -> frozenset[str]:
