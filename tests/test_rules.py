@@ -465,3 +465,152 @@ def test_adg011_method_in_class_and_duplicate_condition() -> None:
     assert summary(findings) == [
         (5, "New branch in `C.f` returns `13` when `n` is `7`, as a test asserts.")
     ]
+
+
+# ---------------------------------------------------------------- ADG012
+
+
+def test_adg012_message_and_scope() -> None:
+    swallow = "try:\n    x()\nexcept Exception as e:\n    return None\n"
+    wrapped = "def f():\n" + "".join(f"    {line}\n" for line in swallow.splitlines())
+    [finding] = check("ADG012", change("src/a.py", "def f():\n    x()\n", wrapped))
+    assert finding.line == 4
+    assert finding.message == "Added `except Exception:` handler that silently discards the error."
+    assert check("ADG012", change("src/a.txt", "", wrapped)) == []
+    assert check("ADG012", change("src/a.py", "def f(:\n", wrapped)) == []
+    assert check("ADG012", change("src/a.py", wrapped, None)) == []
+    assert len(check("ADG012", change("src/a.py", None, wrapped))) == 1
+
+
+def test_adg012_handler_shapes() -> None:
+    def handler(clause: str, body: str) -> str:
+        return f"try:\n    x()\n{clause}\n    {body}\n"
+
+    flagged = [
+        handler("except builtins.BaseException:", "return -1"),
+        handler("except (OSError, Exception):", "return [1, 2]"),
+        handler("except:", "return"),
+    ]
+    kept = [
+        handler("except OSError:", "pass"),
+        handler("except Exception:", "log(e)"),
+        handler("except Exception:", "return compute()"),
+        handler("except (OSError, ValueError):", "pass"),
+    ]
+    for source in flagged:
+        assert len(check("ADG012", change("src/a.py", "", source))) == 1, source
+    for source in kept:
+        assert check("ADG012", change("src/a.py", "", source)) == [], source
+
+
+# ---------------------------------------------------------------- ADG021
+
+
+def test_adg021_messages_for_pyproject() -> None:
+    before = (
+        "[tool.coverage.report]\nfail_under = 90\n\n[tool.mypy]\nstrict = true\n"
+        "\n[tool.ruff.lint]\nignore = []\n"
+    )
+    after = (
+        '[tool.ruff.lint]\nignore = ["E501"]\n\n[tool.mypy]\nstrict = false\n'
+        'disable_error_code = ["misc"]\nignore_errors = true\n'
+        '\n[[tool.mypy.overrides]]\nmodule = "pkg.old"\ndisable_error_code = ["attr-defined"]\n'
+    )
+    findings = check("ADG021", change("pyproject.toml", before, after))
+    assert [(f.line, f.message) for f in findings] == [
+        (None, "Coverage fail_under (90) was removed."),
+        (2, "Added ruff ignore `E501`."),
+        (5, "Turned off mypy strict mode."),
+        (6, "Disabled mypy error code `misc`."),
+        (11, "Disabled mypy error code `attr-defined` for `pkg.old`."),
+        (7, "Set mypy `ignore_errors` everywhere."),
+    ]
+    assert findings[0].evidence == "fail_under (removed)"
+
+
+def test_adg021_strict_removed_entirely_has_no_line() -> None:
+    [finding] = check("ADG021", change("mypy.ini", "[mypy]\nstrict = True\n", "[mypy]\n"))
+    assert (finding.line, finding.message) == (None, "Turned off mypy strict mode.")
+
+
+def test_adg021_new_and_deleted_config_files() -> None:
+    loose = "[tool.ruff]\nignore = ['E501']\n"
+    assert len(check("ADG021", change("pyproject.toml", None, loose))) == 1
+    tight = "[tool.coverage.report]\nfail_under = 90\n"
+    assert [f.message for f in check("ADG021", change("pyproject.toml", tight, None))] == [
+        "Coverage fail_under (90) was removed."
+    ]
+
+
+def test_adg021_workflow_counts_and_deletion() -> None:
+    base = "steps:\n  - run: pytest\n  - run: pytest --slow\n  - run: ruff check .\n"
+    fewer = "steps:\n  - run: pytest\n  - run: ruff check .\n"
+    findings = check("ADG021", change(".github/workflows/ci.yml", base, fewer))
+    assert [(f.line, f.message, f.evidence) for f in findings] == [
+        (None, "Workflow runs `pytest` fewer times (2 -> 1).", "removed: - run: pytest")
+    ]
+    deleted = check("ADG021", change(".github/workflows/ci.yml", base, None))
+    assert [f.message for f in deleted] == [
+        "Workflow no longer runs `pytest`.",
+        "Workflow no longer runs `ruff`.",
+    ]
+
+
+def test_adg021_ignores_other_files_and_unparseable_config() -> None:
+    assert check("ADG021", change("docs/ci.yml", "run: pytest\n", "")) == []
+    assert check("ADG021", change(".github/workflows/notes.md", "pytest\n", "")) == []
+    assert check("ADG021", change("setup.cfg", "[coverage:report]\nfail_under=9\n", "junk")) == []
+
+
+# ---------------------------------------------------------------- ADG030
+
+
+def test_adg030_patch_object_alias_and_new_test() -> None:
+    after = (
+        "from unittest import mock\n"
+        "from dates import parse_date as parse\n"
+        "import dates\n\n"
+        "def test_parse():\n"
+        "    with mock.patch.object(dates, 'parse_date'):\n"
+        "        parse('x')\n"
+    )
+    findings = check("ADG030", change("tests/test_dates.py", None, after))
+    assert summary(findings) == [
+        (6, "Test `test_parse` patches `parse_date`, the function it tests.")
+    ]
+
+
+def test_adg030_unrelated_patches_and_scope() -> None:
+    after = (
+        "from dates import parse_date\n\n"
+        "def test_parse_date(monkeypatch, mocker):\n"
+        "    monkeypatch.setattr('os.getcwd', lambda: '/')\n"
+        "    monkeypatch.setattr('dates.parse_date')\n"
+        "    mocker.patch(target)\n"
+        "    patch.dict('os.environ', {})\n"
+        "    assert parse_date('x')\n"
+    )
+    assert check("ADG030", change("tests/test_dates.py", None, after)) == []
+    assert check("ADG030", change("src/dates.py", None, after)) == []
+    assert check("ADG030", change("tests/test_dates.py", "def test(:\n", after)) == []
+    assert check("ADG030", change("tests/test_dates.py", after, None)) == []
+
+
+# ---------------------------------------------------------------- ADG040
+
+
+def adg040(changed: ChangedFile, uncovered: dict[str, frozenset[int]] | None) -> list[Finding]:
+    rule = registry.get("ADG040")
+    assert rule is not None
+    return list(rule.check(changed, RunContext(changes=(changed,), uncovered_lines=uncovered)))
+
+
+def test_adg040_groups_runs_and_needs_a_report() -> None:
+    changed = change("src/a.py", None, "a = 1\nb = 2\nc = 3\nd = 4\ne = 5\n")
+    findings = adg040(changed, {"src/a.py": frozenset({1, 2, 3, 5})})
+    assert summary(findings) == [
+        (1, "Added lines 1-3 are not executed by the test suite."),
+        (5, "Added line 5 is not executed by the test suite."),
+    ]
+    assert adg040(changed, None) == []
+    assert adg040(change("src/a.py", "a = 1\n", None), {"src/a.py": frozenset({1})}) == []

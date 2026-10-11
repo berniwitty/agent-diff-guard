@@ -1,0 +1,8 @@
+- id: agent-diff-guard
+  name: agent-diff-guard
+  description: Flag shortcut patterns (deleted tests, stubs, suppressions) in staged changes.
+  entry: adg check --staged
+  language: python
+  pass_filenames: false
+  always_run: true
+  stages: [pre-commit]

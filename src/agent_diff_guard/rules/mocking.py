@@ -31,7 +31,6 @@ class MockedSubjectRule:
         if head is None or change.head_src is None or (change.base_src and base is None):
             return []
         imported = from_imports(head)
-        subjects_imported = set(imported) | set(imported.values())
         aliases = import_aliases(head)
         base_tests = test_functions(base) if base is not None else {}
         base_aliases = import_aliases(base) if base is not None else {}
@@ -43,7 +42,9 @@ class MockedSubjectRule:
                 (name for name, _ in old), patch_targets(test, aliases), change.added_lines
             )
             for name, line in new:
-                if name in subjects_imported and _is_subject(name, test):
+                # Local names the test module binds to the patched name (`import x as y`).
+                local = {key for key, original in imported.items() if name in (key, original)}
+                if local and _is_subject(local | {name}, test):
                     findings.append(
                         Finding(
                             rule_id=self.id,
@@ -57,12 +58,12 @@ class MockedSubjectRule:
         return findings
 
 
-def _is_subject(name: str, test: FunctionNode) -> bool:
-    """The test is named after ``name`` or calls it directly (``name(...)``)."""
-    if name in test.name:
+def _is_subject(names: set[str], test: FunctionNode) -> bool:
+    """The test is named after one of ``names`` or calls one directly (``name(...)``)."""
+    if any(name in test.name for name in names):
         return True
     return any(
-        isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == name
+        isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in names
         for node in walk_skipping_definitions(test.body)
     )
 
