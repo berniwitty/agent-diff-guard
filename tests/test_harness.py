@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -138,3 +139,15 @@ def test_discover_cases_walks_rule_kind_case(tmp_path: Path) -> None:
 
 def test_discover_cases_missing_root(tmp_path: Path) -> None:
     assert discover_cases(tmp_path / "nope") == []
+
+
+def test_build_repo_records_same_size_change_with_identical_mtime(tmp_path: Path) -> None:
+    case = tmp_path / "case"
+    write(case / "before" / "a.py", "a = 0\n")
+    write(case / "after" / "a.py", "a = 1\n")
+    stamp = (case / "before" / "a.py").stat().st_mtime_ns
+    os.utime(case / "after" / "a.py", ns=(stamp, stamp))
+
+    repo = build_repo(case, tmp_path / "repo")
+
+    assert git(repo.path, "diff", "--name-status", repo.base, repo.head) == "M\ta.py"

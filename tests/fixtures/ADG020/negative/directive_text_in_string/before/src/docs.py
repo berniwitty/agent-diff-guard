@@ -1,0 +1,1 @@
+HELP = "usage: tool [options]"
