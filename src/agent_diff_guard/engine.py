@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
 from agent_diff_guard.astutil import assertion_literal_sets, parse
 from agent_diff_guard.classify import DEFAULT_TEST_PATTERNS, is_python_file, is_test_file
 from agent_diff_guard.config import Config, parse_config
+from agent_diff_guard.coverage_report import load_coverage
 from agent_diff_guard.git import DiffSpec, Git
 from agent_diff_guard.rules.base import Finding, Rule, RunContext, Severity
 from agent_diff_guard.suppress import Suppressed, apply_suppressions
@@ -43,7 +45,10 @@ def load_config(git: Git, spec: DiffSpec, known_rules: Iterable[str]) -> Config:
 
 
 def build_context(
-    git: Git, spec: DiffSpec, test_patterns: tuple[str, ...] = DEFAULT_TEST_PATTERNS
+    git: Git,
+    spec: DiffSpec,
+    test_patterns: tuple[str, ...] = DEFAULT_TEST_PATTERNS,
+    uncovered: Mapping[str, frozenset[int]] | None = None,
 ) -> RunContext:
     """Read everything the rules need from git; rules themselves never touch git."""
     changes = git.changed_files(spec)
@@ -59,6 +64,7 @@ def build_context(
         changes=tuple(changes),
         test_patterns=test_patterns,
         assertion_literals=frozenset(literal_sets),
+        uncovered_lines=uncovered,
     )
 
 
@@ -80,6 +86,32 @@ def evaluate(rules: Iterable[Rule], ctx: RunContext, config: Config) -> Outcome:
     sources = {change.path: change.head_src for change in ctx.changes if change.head_src}
     kept, suppressed = apply_suppressions(findings, sources)
     return Outcome(tuple(kept), tuple(suppressed), len(ctx.changes), active)
+
+
+def analyze(
+    repo: Path,
+    rules: Sequence[Rule],
+    *,
+    base: str | None = None,
+    head: str | None = None,
+    staged: bool = False,
+    coverage: Path | None = None,
+) -> tuple[Outcome, Config]:
+    """The whole pipeline for one repository and diff selection.
+
+    Raises ``GitError``, ``ConfigError`` or ``CoverageReportError`` for bad input.
+    """
+    git = Git.discover(repo)
+    if staged:
+        spec = git.staged()
+    elif base is not None:
+        spec = git.range_from_base(base, head)
+    else:
+        spec = git.working_tree()
+    config = load_config(git, spec, (rule.id for rule in rules))
+    uncovered = load_coverage(coverage, git.root) if coverage is not None else None
+    ctx = build_context(git, spec, config.test_patterns, uncovered)
+    return evaluate(rules, ctx, config), config
 
 
 def exit_code(findings: Iterable[Finding], fail_on: Severity) -> int:

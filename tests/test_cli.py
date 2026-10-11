@@ -211,7 +211,10 @@ def test_check_reads_config_from_base_revision(tmp_path: Path) -> None:
         "src/calc.py:1: warn ADG010 Function `add` had real logic and now has a stub body."
     )
     assert not any("ADG020" in line or "vendor/" in line for line in lines)
-    assert lines[-1].startswith("Checked 4 changed file(s) with 7 rule(s): 0 error, 1 warn")
+    enabled = len(registry.all()) - 1  # ADG020 is disabled by the base config
+    assert (
+        lines[-1] == f"Checked 4 changed file(s) with {enabled} rule(s): 0 error, 1 warn, 0 info."
+    )
     explicit = runner.invoke(
         cli.app, ["check", "--repo", str(repo.path), "--base", repo.base, "--fail-on", "error"]
     )

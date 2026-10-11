@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import cached_property
@@ -41,11 +41,14 @@ class RunContext:
 
     ``assertion_literals`` holds, for each assertion in every test file at head (changed
     or not), the set of scalar literal keys it contains (see ``astutil.literal_keys``).
+    ``uncovered_lines`` maps repository paths to lines a coverage report measured but
+    never executed; it is ``None`` when no report was given.
     """
 
     changes: tuple[ChangedFile, ...] = ()
     test_patterns: tuple[str, ...] = DEFAULT_TEST_PATTERNS
     assertion_literals: frozenset[frozenset[str]] = frozenset()
+    uncovered_lines: Mapping[str, frozenset[int]] | None = None
 
     def is_test_file(self, path: str) -> bool:
         return is_test_file(path, self.test_patterns)

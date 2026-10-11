@@ -1,0 +1,9 @@
+{
+  "findings": [
+    {
+      "rule_id": "ADG040",
+      "path": "src/refund.py",
+      "line": 3
+    }
+  ]
+}

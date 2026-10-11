@@ -1,0 +1,14 @@
+{
+  "findings": [
+    {
+      "rule_id": "ADG021",
+      "path": "pyproject.toml",
+      "line": 10
+    },
+    {
+      "rule_id": "ADG021",
+      "path": "pyproject.toml",
+      "line": 13
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+[project]
+name = "shop"
+version = "1.0.0"
+
+[tool.coverage.report]
+fail_under = 70
+
+[tool.ruff.lint]
+select = ["E", "F"]
+ignore = ["E501"]

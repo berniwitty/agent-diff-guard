@@ -1,0 +1,14 @@
+{
+  "findings": [
+    {
+      "rule_id": "ADG012",
+      "path": "src/worker.py",
+      "line": 4
+    },
+    {
+      "rule_id": "ADG012",
+      "path": "src/worker.py",
+      "line": 8
+    }
+  ]
+}
