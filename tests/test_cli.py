@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import io
+import re
 import sys
 from collections.abc import Iterable
 from pathlib import Path
 
 import pytest
-from typer.testing import CliRunner
+from typer.testing import CliRunner, Result
 
 from agent_diff_guard import cli
 from agent_diff_guard.change import ChangedFile
@@ -14,6 +15,12 @@ from agent_diff_guard.rules.base import Finding, RuleRegistry, RunContext, Sever
 from tests.harness import git, make_repo
 
 runner = CliRunner()
+# Typer renders usage errors with rich; on CI (GITHUB_ACTIONS) that output is colourised.
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def plain(result: Result) -> str:
+    return ANSI_ESCAPE.sub("", result.output)
 
 
 class DummyRule:
@@ -40,8 +47,8 @@ def one_rule_registry(empty_registry: RuleRegistry) -> RuleRegistry:
 
 def test_no_args_shows_help() -> None:
     result = runner.invoke(cli.app, [])
-    assert "check" in result.output
-    assert "explain" in result.output
+    assert "check" in plain(result)
+    assert "explain" in plain(result)
 
 
 CALC = "def add(a, b):\n    return a + b\n"
@@ -54,7 +61,7 @@ def test_check_with_no_rules_reports_zero_rules(tmp_path: Path) -> None:
     repo = make_repo(tmp_path, {"src/calc.py": CALC}, {"src/calc.py": STUBBED})
     result = runner.invoke(cli.app, ["check", "--repo", str(repo.path), "--base", repo.base])
     assert result.exit_code == 0
-    assert result.output.strip() == (
+    assert plain(result).strip() == (
         "Checked 1 changed file(s) with 0 rule(s): 0 error, 0 warn, 0 info."
     )
 
@@ -65,7 +72,7 @@ def test_check_reports_error_finding_and_exits_1(tmp_path: Path) -> None:
         cli.app, ["check", "--repo", str(repo.path), "--base", repo.base, "--head", repo.head]
     )
     assert result.exit_code == 1
-    assert result.output.splitlines() == [
+    assert plain(result).splitlines() == [
         "src/calc.py:1: error ADG010 Function `add` had real logic and now has a stub body.",
         "    return a + b -> pass",
         "Checked 1 changed file(s) with 3 rule(s): 1 error, 0 warn, 0 info.",
@@ -78,7 +85,7 @@ def test_check_fail_on_controls_exit_code(tmp_path: Path) -> None:
     assert runner.invoke(cli.app, args).exit_code == 0
     warn = runner.invoke(cli.app, [*args, "--fail-on", "warn"])
     assert warn.exit_code == 1
-    assert "src/b.py:1: warn ADG020" in warn.output
+    assert "src/b.py:1: warn ADG020" in plain(warn)
 
 
 def test_check_default_reads_uncommitted_changes(tmp_path: Path) -> None:
@@ -86,7 +93,7 @@ def test_check_default_reads_uncommitted_changes(tmp_path: Path) -> None:
     (repo.path / "src" / "calc.py").write_text(STUBBED, encoding="utf-8")
     result = runner.invoke(cli.app, ["check", "--repo", str(repo.path)])
     assert result.exit_code == 1
-    assert "src/calc.py:1: error ADG010" in result.output
+    assert "src/calc.py:1: error ADG010" in plain(result)
 
 
 def test_check_staged_ignores_unstaged_changes(tmp_path: Path) -> None:
@@ -96,45 +103,45 @@ def test_check_staged_ignores_unstaged_changes(tmp_path: Path) -> None:
     git(repo.path, "add", "src/calc.py")
     result = runner.invoke(cli.app, ["check", "--repo", str(repo.path), "--staged"])
     assert result.exit_code == 1
-    assert "src/calc.py:1: error ADG010" in result.output
-    assert "src/other.py" not in result.output
+    assert "src/calc.py:1: error ADG010" in plain(result)
+    assert "src/other.py" not in plain(result)
 
 
 def test_check_outside_a_repository_is_usage_error(tmp_path: Path) -> None:
     result = runner.invoke(cli.app, ["check", "--repo", str(tmp_path)])
     assert result.exit_code == 2
-    assert result.output.startswith("adg check: git rev-parse failed")
+    assert plain(result).startswith("adg check: git rev-parse failed")
 
 
 def test_check_unknown_base_is_usage_error(tmp_path: Path) -> None:
     repo = make_repo(tmp_path, {}, {"a.py": "x = 1\n"})
     result = runner.invoke(cli.app, ["check", "--repo", str(repo.path), "--base", "nope"])
     assert result.exit_code == 2
-    assert "'nope' is not a commit" in result.output
+    assert "'nope' is not a commit" in plain(result)
 
 
 def test_check_head_requires_base() -> None:
     result = runner.invoke(cli.app, ["check", "--head", "HEAD"])
     assert result.exit_code == 2
-    assert "--head requires --base" in result.output
+    assert "--head requires --base" in plain(result)
 
 
 def test_check_rejects_head_with_staged() -> None:
     result = runner.invoke(cli.app, ["check", "--head", "HEAD", "--staged"])
     assert result.exit_code == 2
-    assert "cannot be used together" in result.output
+    assert "cannot be used together" in plain(result)
 
 
 def test_check_unimplemented_format_is_usage_error() -> None:
     result = runner.invoke(cli.app, ["check", "--format", "json"])
     assert result.exit_code == 2
-    assert "--format json is not implemented yet" in result.output
+    assert "--format json is not implemented yet" in plain(result)
 
 
 def test_check_rejects_base_with_staged() -> None:
     result = runner.invoke(cli.app, ["check", "--base", "origin/main", "--staged"])
     assert result.exit_code == 2
-    assert "cannot be used together" in result.output
+    assert "cannot be used together" in plain(result)
 
 
 def test_check_rejects_unknown_format() -> None:
@@ -146,28 +153,28 @@ def test_check_rejects_unknown_format() -> None:
 def test_rules_with_empty_registry() -> None:
     result = runner.invoke(cli.app, ["rules"])
     assert result.exit_code == 0
-    assert result.output.strip() == "No rules registered."
+    assert plain(result).strip() == "No rules registered."
 
 
 @pytest.mark.usefixtures("one_rule_registry")
 def test_rules_lists_id_name_and_severity() -> None:
     result = runner.invoke(cli.app, ["rules"])
     assert result.exit_code == 0
-    assert result.output.split() == ["ADG002", "test-skipped", "error"]
+    assert plain(result).split() == ["ADG002", "test-skipped", "error"]
 
 
 @pytest.mark.usefixtures("one_rule_registry")
 def test_explain_known_rule_is_case_insensitive() -> None:
     result = runner.invoke(cli.app, ["explain", "adg002"])
     assert result.exit_code == 0
-    assert result.output.strip() == "ADG002 test-skipped (default severity: error)"
+    assert plain(result).strip() == "ADG002 test-skipped (default severity: error)"
 
 
 @pytest.mark.usefixtures("empty_registry")
 def test_explain_unknown_rule_is_usage_error() -> None:
     result = runner.invoke(cli.app, ["explain", "ADG999"])
     assert result.exit_code == 2
-    assert "Unknown rule ID: ADG999" in result.output
+    assert "Unknown rule ID: ADG999" in plain(result)
 
 
 @pytest.mark.parametrize("err", [False, True])
