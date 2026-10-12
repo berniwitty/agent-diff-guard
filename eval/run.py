@@ -11,7 +11,7 @@ For each pinned commit in ``eval/commits.txt``:
 Usage::
 
     python -m eval.run [--commits eval/commits.txt] [--repos eval/.repos]
-                       [--out eval/results] [--limit N]
+                       [--out eval/results] [--limit N] [--jobs N]
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ import argparse
 import json
 from collections import Counter
 from collections.abc import Sequence
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -77,6 +78,12 @@ def evaluate_commit(repo_name: str, git: Git, sha: str) -> CommitResult:
         original=[_finding_dict(f) for f in original.findings],
         injected=injected,
     )
+
+
+def _evaluate(job: tuple[str, Path, str]) -> CommitResult:
+    """Top-level so worker processes can run it."""
+    name, repo, sha = job
+    return evaluate_commit(name, Git(repo), sha)
 
 
 def _count(findings: Sequence[Finding], rule_id: str, path: str) -> int:
@@ -167,13 +174,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--repos", type=Path, default=EVAL_DIR / ".repos")
     parser.add_argument("--out", type=Path, default=EVAL_DIR / "results")
     parser.add_argument("--limit", type=int, default=None, help="Evaluate only N commits.")
+    parser.add_argument("--jobs", type=int, default=1, help="Commits evaluated in parallel.")
     args = parser.parse_args(argv)
 
     commits = read_commits(args.commits)[: args.limit]
+    jobs = [(name, args.repos / name, sha) for name, sha in commits]
     results = []
-    for index, (name, sha) in enumerate(commits, 1):
-        print(f"[{index}/{len(commits)}] {name} {sha[:12]}", flush=True)
-        results.append(evaluate_commit(name, Git(args.repos / name), sha))
+    if args.jobs > 1:
+        with ProcessPoolExecutor(max_workers=args.jobs) as pool:
+            for index, result in enumerate(pool.map(_evaluate, jobs), 1):
+                print(f"[{index}/{len(jobs)}] {result.repo} {result.sha[:12]}", flush=True)
+                results.append(result)
+    else:
+        for index, job in enumerate(jobs, 1):
+            print(f"[{index}/{len(jobs)}] {job[0]} {job[2][:12]}", flush=True)
+            results.append(_evaluate(job))
     stats = summarize(results)
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "results.json").write_text(

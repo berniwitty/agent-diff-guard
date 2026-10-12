@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import functools
 import io
 import tokenize
 from collections import Counter
@@ -17,10 +18,12 @@ DefinitionNode = ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
 Site = tuple[str, int]
 
 
+@functools.lru_cache(maxsize=64)
 def parse(source: str | None) -> ast.Module | None:
     """Parse ``source``; ``None`` if it is absent or not valid Python.
 
     Rules cannot reason about code that does not parse, so they treat it as absent.
+    Results are cached so every rule shares one tree per file: never mutate the tree.
     """
     if source is None:
         return None

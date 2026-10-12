@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -57,15 +58,21 @@ def build_context(
     )
     literal_sets: set[frozenset[str]] = set()
     for source in test_sources.values():
-        module = parse(source)
-        if module is not None:
-            literal_sets |= assertion_literal_sets(module)
+        literal_sets |= _assertion_literals(source)
     return RunContext(
         changes=tuple(changes),
         test_patterns=test_patterns,
         assertion_literals=frozenset(literal_sets),
         uncovered_lines=uncovered,
     )
+
+
+@functools.lru_cache(maxsize=8192)
+def _assertion_literals(source: str) -> frozenset[frozenset[str]]:
+    """Literal sets of one test file; cached by content, so files unchanged between
+    runs in one process (the evaluation runs thousands) are parsed once."""
+    module = parse(source)
+    return frozenset(assertion_literal_sets(module)) if module is not None else frozenset()
 
 
 def run_rules(rules: Iterable[Rule], ctx: RunContext) -> list[Finding]:

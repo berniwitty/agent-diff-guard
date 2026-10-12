@@ -113,6 +113,12 @@ def test_injected_commit_leaves_the_repository_untouched(
             '[tool.ruff]\nextend-ignore = ["E501"]\nline-length = 90\n',
         ),
         (
+            # E501 is already ignored, so the injection must pick another code.
+            {"pyproject.toml": "[tool.ruff]\nignore = ['E501']\n"},
+            "pyproject.toml",
+            "[tool.ruff]\nextend-ignore = [\"F401\"]\nignore = ['E501']\n",
+        ),
+        (
             {".github/workflows/ci.yml": "steps:\n  - run: pytest -q\n"},
             ".github/workflows/ci.yml",
             "steps:\n  - run: pytest -q || true\n",
@@ -138,6 +144,7 @@ def test_loosen_gate_fallbacks(
     [
         {"pyproject.toml": "[tool.ruff]\nextend-ignore = ['E501']\n"},
         {"pyproject.toml": "[tool.ruff\n"},
+        {"pyproject.toml": "[tool.ruff]\nignore = ['E501', 'F401', 'E722', 'B008', 'S101']\n"},
         {"pyproject.toml": "[project]\nname = 'x'\n"},
         {"setup.cfg": "[coverage:report]\nfail_under = 5\n"},
         {".github/workflows/ci.yml": "steps:\n  - run: pytest || exit 0\n"},
@@ -192,8 +199,13 @@ def test_run_main_end_to_end(tmp_path: Path, honest_commit: tuple[Git, str, str]
     code = run.main(
         ["--commits", str(commits), "--repos", str(repo.root.parent), "--out", str(out)]
     )
+    args = ["--commits", str(commits), "--repos", str(repo.root.parent)]
+    parallel = run.main([*args, "--out", str(out / "p"), "--jobs", "2"])
 
-    assert code == 0
+    assert code == parallel == 0
+    assert (out / "p" / "RESULTS.md").read_text(encoding="utf-8") == (out / "RESULTS.md").read_text(
+        encoding="utf-8"
+    )
     assert "| ADG001 | error | 1 | 1 | 100% | 0 | 0.0% |" in (out / "RESULTS.md").read_text(
         encoding="utf-8"
     )

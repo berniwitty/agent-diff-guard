@@ -22,7 +22,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
-from agent_diff_guard import astutil
+from agent_diff_guard import astutil, gates
 from agent_diff_guard.classify import is_python_file, is_test_file
 from agent_diff_guard.gates import CHECK_TOOLS, INI_FILES
 from agent_diff_guard.git import Git
@@ -396,6 +396,7 @@ def add_reasonless_allow(view: CommitView) -> Edit | None:
     return _append_comment(view, "# adg: allow ADG010", tests=False)
 
 
+_RUFF_CODES = ("E501", "F401", "E722", "B008", "S101")
 _FAIL_UNDER = re.compile(r"^(\s*fail_under\s*=\s*)(\d+(?:\.\d+)?)(.*)$")
 
 
@@ -442,12 +443,18 @@ def _add_ruff_ignore(path: str, text: str) -> Edit | None:
     table, header = (lint, "[tool.ruff.lint]") if isinstance(lint, dict) else (ruff, "[tool.ruff]")
     if "extend-ignore" in table:
         return None
+    # The injected code must not already be ignored, or nothing gets looser.
+    current = gates.from_pyproject(text)
+    ignored = current.ruff_ignores if current is not None else frozenset()
+    code = next((c for c in _RUFF_CODES if c not in ignored), None)
+    if code is None:
+        return None
     lines = _lines(text)
     for number, line in enumerate(lines, 1):
         if line.strip() == header:
-            new = f'extend-ignore = ["E501"]{_eol(text)}'
+            new = f'extend-ignore = ["{code}"]{_eol(text)}'
             edited = _replace(text, number + 1, number, [new])
-            return Edit(path, edited, "added a ruff ignore")
+            return Edit(path, edited, f"added ruff ignore {code}")
     return None
 
 
