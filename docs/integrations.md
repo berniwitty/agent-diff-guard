@@ -32,14 +32,20 @@ jobs:
           fetch-depth: 0       # adg needs the base commit
       - uses: berniwitty/agent-diff-guard@v0.1.0
         with:
-          fail-on: error       # optional; also: base, coverage, upload-sarif
+          fail-on: error       # optional; also: base, coverage, upload-sarif, fail-on-findings
 ```
 
 The action:
 - compares the PR head against the PR's base commit (or `github.event.before` on push),
 - uploads SARIF so findings appear as code-scanning annotations on the diff,
 - writes a Markdown summary to the job summary page,
-- fails the step when there are findings at or above `fail-on`.
+- fails the step when there are findings at or above `fail-on` (set
+  `fail-on-findings: "false"` to only report; the `exit-code` output still says what
+  adg found, and usage errors still fail).
+
+This repository runs the action on itself in
+[`.github/workflows/action.yml`](../.github/workflows/action.yml): once on each change
+(must pass) and once on a commit with a planted stub (must report ADG010).
 
 Code scanning (the SARIF upload) needs GitHub Advanced Security on private repositories.
 Set `upload-sarif: "false"` if it is not available; the job summary and exit code still
