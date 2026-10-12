@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from agent_diff_guard.engine import run_rules
+from agent_diff_guard.engine import build_context, run_rules
 from agent_diff_guard.git import Git
-from agent_diff_guard.rules.base import RunContext, registry
+from agent_diff_guard.rules import registry
 from tests.harness import FixtureCase, build_repo, discover_cases
 
 CASES = discover_cases()
@@ -20,9 +20,9 @@ def test_fixture_case(case: FixtureCase, tmp_path: Path) -> None:
     assert rule is not None, f"{case.rule_id} has fixtures but no registered rule"
     repo = build_repo(case.root, tmp_path / "repo")
     git = Git.discover(repo.path)
-    changes = git.changed_files(git.range_from_base(repo.base, repo.head))
+    ctx = build_context(git, git.range_from_base(repo.base, repo.head))
 
-    findings = run_rules([rule], RunContext(changes=tuple(changes)))
+    findings = run_rules([rule], ctx)
 
     actual = sorted((f.rule_id, f.path, f.line) for f in findings)
     expected = sorted((e.rule_id, e.path, e.line) for e in case.expected())

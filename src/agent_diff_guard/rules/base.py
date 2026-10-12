@@ -5,10 +5,12 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import cached_property
 from typing import Protocol
 
+from agent_diff_guard.astutil import fingerprint, functions, normalized_body, parse, test_functions
 from agent_diff_guard.change import ChangedFile
-from agent_diff_guard.classify import DEFAULT_TEST_PATTERNS, is_test_file
+from agent_diff_guard.classify import DEFAULT_TEST_PATTERNS, is_python_file, is_test_file
 
 
 class Severity(StrEnum):
@@ -35,13 +37,62 @@ class Finding:
 
 @dataclass(frozen=True)
 class RunContext:
-    """Information shared by every rule during one run."""
+    """Information shared by every rule during one run.
+
+    ``assertion_literals`` holds, for each assertion in every test file at head (changed
+    or not), the set of scalar literal keys it contains (see ``astutil.literal_keys``).
+    """
 
     changes: tuple[ChangedFile, ...] = ()
     test_patterns: tuple[str, ...] = DEFAULT_TEST_PATTERNS
+    assertion_literals: frozenset[frozenset[str]] = frozenset()
 
     def is_test_file(self, path: str) -> bool:
         return is_test_file(path, self.test_patterns)
+
+    def is_python_test(self, path: str) -> bool:
+        return is_python_file(path) and self.is_test_file(path)
+
+    def is_python_source(self, path: str) -> bool:
+        return is_python_file(path) and not self.is_test_file(path)
+
+    @cached_property
+    def new_test_bodies(self) -> tuple[str, ...]:
+        """Normalised bodies of test functions that are new anywhere in this diff."""
+        bodies: list[str] = []
+        for change in self.changes:
+            if not self.is_python_test(change.path):
+                continue
+            head = parse(change.head_src)
+            if head is None:
+                continue
+            base = parse(change.base_src)
+            existing = test_functions(base) if base is not None else {}
+            bodies.extend(
+                normalized_body(node)
+                for qualname, node in test_functions(head).items()
+                if qualname not in existing
+            )
+        return tuple(bodies)
+
+    @cached_property
+    def changed_function_names(self) -> frozenset[str]:
+        """Simple names of non-test functions that are new or modified in this diff."""
+        names: set[str] = set()
+        for change in self.changes:
+            if not self.is_python_source(change.path):
+                continue
+            head = parse(change.head_src)
+            if head is None:
+                continue
+            base = parse(change.base_src)
+            before = {q: fingerprint(n) for q, n in functions(base).items()} if base else {}
+            names.update(
+                node.name
+                for qualname, node in functions(head).items()
+                if before.get(qualname) != fingerprint(node)
+            )
+        return frozenset(names)
 
 
 class Rule(Protocol):

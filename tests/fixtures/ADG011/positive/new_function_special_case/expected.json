@@ -1,0 +1,9 @@
+{
+  "findings": [
+    {
+      "rule_id": "ADG011",
+      "path": "src/pricing.py",
+      "line": 2
+    }
+  ]
+}

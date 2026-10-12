@@ -1,17 +1,21 @@
-"""R2 implementation hollowing: ADG010 stub-body."""
+"""R2 implementation hollowing: ADG010 stub-body, ADG011 hardcoded-test-value."""
 
 from __future__ import annotations
 
 import ast
+from collections import Counter
 
 from agent_diff_guard.astutil import (
     FunctionNode,
     body_without_docstring,
+    branch_conditions,
     functions,
     import_aliases,
     is_stub_body,
     parse,
     resolved_name,
+    source_line,
+    special_cases,
 )
 from agent_diff_guard.change import ChangedFile
 from agent_diff_guard.classify import is_python_file
@@ -71,4 +75,71 @@ def _summary(node: FunctionNode) -> str:
     return text if len(text) <= _EVIDENCE_WIDTH else text[: _EVIDENCE_WIDTH - 3] + "..."
 
 
+# Literals too common to identify a specific test input.
+TRIVIAL_LITERALS = frozenset(
+    {
+        "NoneType:None",
+        "bool:True",
+        "bool:False",
+        "int:-1",
+        "int:0",
+        "int:1",
+        "int:2",
+        "float:0.0",
+        "float:1.0",
+        "str:''",
+        "bytes:b''",
+    }
+)
+
+
+class HardcodedTestValueRule:
+    id = "ADG011"
+    name = "hardcoded-test-value"
+    default_severity = Severity.ERROR
+
+    def check(self, change: ChangedFile, ctx: RunContext) -> list[Finding]:
+        if not ctx.is_python_source(change.path) or not ctx.assertion_literals:
+            return []
+        head = parse(change.head_src)
+        base = parse(change.base_src)
+        if head is None or change.head_src is None or (change.base_src and base is None):
+            return []
+        base_functions = functions(base) if base is not None else {}
+        findings = []
+        for qualname, node in functions(head).items():
+            before = base_functions.get(qualname)
+            existing = branch_conditions(before) if before is not None else Counter[str]()
+            for case in special_cases(node):
+                if existing[case.condition] > 0:
+                    existing[case.condition] -= 1
+                    continue
+                inputs = [
+                    literal
+                    for literal in sorted(case.compared - TRIVIAL_LITERALS)
+                    if any({literal, case.returned} <= seen for seen in ctx.assertion_literals)
+                ]
+                if not inputs:
+                    continue
+                findings.append(
+                    Finding(
+                        rule_id=self.id,
+                        severity=self.default_severity,
+                        path=change.path,
+                        line=case.line,
+                        message=(
+                            f"New branch in `{qualname}` returns `{_shown(case.returned)}` when "
+                            f"`{case.parameter}` is `{_shown(inputs[0])}`, as a test asserts."
+                        ),
+                        evidence=source_line(change.head_src, case.line),
+                    )
+                )
+        return findings
+
+
+def _shown(literal_key: str) -> str:
+    return literal_key.split(":", 1)[1]
+
+
 registry.register(StubBodyRule())
+registry.register(HardcodedTestValueRule())

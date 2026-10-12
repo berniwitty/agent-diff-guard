@@ -21,6 +21,8 @@ packages = ["src/agent_diff_guard"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# Fixture trees are inputs for adg and deliberately contain the shortcuts it detects.
+extend-exclude = ["tests/fixtures"]
 
 [tool.ruff.format]
 # Markdown code blocks (spec, rule docs with "bad" examples) are kept as written.

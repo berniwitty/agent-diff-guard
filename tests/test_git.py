@@ -226,3 +226,54 @@ def test_missing_git_executable(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
     monkeypatch.setattr(git_module.subprocess, "run", no_git)
     with pytest.raises(GitError, match="git executable not found"):
         Git.discover(tmp_path)
+
+
+def is_py(path: str) -> bool:
+    return path.endswith(".py")
+
+
+def test_head_sources_commit_reads_unchanged_files_too(tmp_path: Path) -> None:
+    repo = make_repo(
+        tmp_path,
+        {"tests/test_a.py": "a = 1\n", "notes.txt": "n\n"},
+        {"tests/test_a.py": "a = 1\n", "tests/test_b.py": "b = 2\n", "notes.txt": "n\n"},
+    )
+    g = Git.discover(repo.path)
+
+    sources = g.head_sources(g.range_from_base(repo.base, repo.head), is_py)
+
+    assert sources == {"tests/test_a.py": "a = 1\n", "tests/test_b.py": "b = 2\n"}
+
+
+def test_head_sources_index_and_worktree(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path, {}, {"a.py": "a = 1\n", "gone.py": "g = 1\n"})
+    (repo.path / "a.py").write_bytes(b"a = 2\n")
+    git(repo.path, "add", "a.py")
+    (repo.path / "a.py").write_bytes(b"a = 3\n")
+    (repo.path / "gone.py").unlink()
+    (repo.path / "new.py").write_bytes(b"n = 1\n")
+    g = Git.discover(repo.path)
+
+    staged = g.head_sources(g.staged(), is_py)
+    worktree = g.head_sources(g.working_tree(), is_py)
+
+    assert staged == {"a.py": "a = 2\n", "gone.py": "g = 1\n"}
+    assert worktree == {"a.py": "a = 3\n", "new.py": "n = 1\n"}
+
+
+def test_head_sources_skips_gitlinks(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path, {}, {"a.py": "a = 1\n"})
+    git(repo.path, "update-index", "--add", "--cacheinfo", f"160000,{repo.head},vendor/sub.py")
+    git(repo.path, "commit", "--quiet", "-m", "add gitlink")
+    g = Git.discover(repo.path)
+
+    assert g.head_sources(g.range_from_base(repo.base, "HEAD"), is_py) == {"a.py": "a = 1\n"}
+    assert g.head_sources(g.staged(), is_py) == {"a.py": "a = 1\n"}
+
+
+def test_blobs_reports_missing_objects(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path, {}, {"a.py": "a = 1\n"})
+    g = Git.discover(repo.path)
+    with pytest.raises(GitError, match=f"cannot read blob {SHA_A}: {SHA_A} missing"):
+        g._blobs([SHA_A])
+    assert g._blobs([]) == {}
