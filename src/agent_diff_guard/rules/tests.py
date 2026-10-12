@@ -16,12 +16,12 @@ from agent_diff_guard.astutil import (
     Strength,
     approx_calls,
     assertions,
+    body_shape,
     body_without_docstring,
     called_names,
     classes,
     excess_sites,
     import_aliases,
-    normalized_body,
     parse,
     resolved_name,
     source_line,
@@ -182,14 +182,18 @@ def _marker_sites(expr: ast.expr, aliases: dict[str, str]) -> list[Site]:
 
 # ---------------------------------------------------------------------------- ADG001
 
-# Bodies at least this similar count as the same test (renamed or moved).
+# Bodies at least this similar count as the same test (renamed or moved)...
 SIMILARITY = 0.8
+# ...if they also share at least this much of their literal values.
+SAME_VALUES = 0.5
 
 
 class RemovedTestRule:
     id = "ADG001"
     name = "test-removed"
-    default_severity = Severity.ERROR
+    # warn, not error: removals that go with a removed feature or a rewrite are common in
+    # honest changes (8% of evaluated commits, docs/evaluation.md).
+    default_severity = Severity.WARN
 
     def check(self, change: ChangedFile, ctx: RunContext) -> list[Finding]:
         if not ctx.is_python_test(change.path) or change.base_src is None:
@@ -228,8 +232,23 @@ class RemovedTestRule:
 
 
 def _moved(node: FunctionNode, ctx: RunContext) -> bool:
-    body = normalized_body(node)
-    return any(_similar(body, other) for other in ctx.new_test_bodies)
+    """A test new elsewhere in the diff does the same thing: a rename or a move.
+
+    The body must be similar *and* check mostly the same values, so deleting a test
+    while adding a similar-looking test of other values is still a removal.
+    """
+    shape = body_shape(node)
+    return any(
+        _similar(shape.body, other.body) and _overlap(shape.literals, other.literals) >= SAME_VALUES
+        for other in ctx.new_test_shapes
+    )
+
+
+def _overlap(first: frozenset[str], second: frozenset[str]) -> float:
+    """Jaccard overlap of two literal sets; two tests without literals overlap fully."""
+    if not first and not second:
+        return 1.0
+    return len(first & second) / len(first | second)
 
 
 def _similar(first: str, second: str) -> bool:

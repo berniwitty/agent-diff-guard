@@ -1,0 +1,4 @@
+# name  clone URL  (well-maintained Python projects with substantial test suites)
+httpx     https://github.com/encode/httpx
+pydantic  https://github.com/pydantic/pydantic
+rich      https://github.com/Textualize/rich

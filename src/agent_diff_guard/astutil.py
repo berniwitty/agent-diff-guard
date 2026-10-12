@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import functools
 import io
 import tokenize
 from collections import Counter
@@ -17,10 +18,12 @@ DefinitionNode = ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
 Site = tuple[str, int]
 
 
+@functools.lru_cache(maxsize=64)
 def parse(source: str | None) -> ast.Module | None:
     """Parse ``source``; ``None`` if it is absent or not valid Python.
 
     Rules cannot reason about code that does not parse, so they treat it as absent.
+    Results are cached so every rule shares one tree per file: never mutate the tree.
     """
     if source is None:
         return None
@@ -203,6 +206,20 @@ def test_functions(module: ast.Module) -> dict[str, FunctionNode]:
 def normalized_body(node: FunctionNode) -> str:
     """The body's source without docstring, formatting or comments."""
     return "\n".join(ast.unparse(stmt) for stmt in body_without_docstring(node))
+
+
+@dataclass(frozen=True)
+class BodyShape:
+    """What a test does: its normalised body and the literal values it checks."""
+
+    body: str
+    literals: frozenset[str]
+
+
+def body_shape(node: FunctionNode) -> BodyShape:
+    statements = body_without_docstring(node)
+    literals = frozenset().union(*(literal_keys(stmt) for stmt in statements))
+    return BodyShape(normalized_body(node), literals)
 
 
 def fingerprint(node: ast.AST) -> str:
