@@ -8,6 +8,7 @@ from enum import StrEnum
 from typing import Protocol
 
 from agent_diff_guard.change import ChangedFile
+from agent_diff_guard.classify import DEFAULT_TEST_PATTERNS, is_test_file
 
 
 class Severity(StrEnum):
@@ -37,6 +38,10 @@ class RunContext:
     """Information shared by every rule during one run."""
 
     changes: tuple[ChangedFile, ...] = ()
+    test_patterns: tuple[str, ...] = DEFAULT_TEST_PATTERNS
+
+    def is_test_file(self, path: str) -> bool:
+        return is_test_file(path, self.test_patterns)
 
 
 class Rule(Protocol):

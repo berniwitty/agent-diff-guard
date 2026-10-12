@@ -1,0 +1,9 @@
+{
+  "findings": [
+    {
+      "rule_id": "ADG020",
+      "path": "src/compat.py",
+      "line": 1
+    }
+  ]
+}

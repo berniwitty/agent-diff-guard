@@ -1,0 +1,14 @@
+{
+  "findings": [
+    {
+      "rule_id": "ADG020",
+      "path": "src/debug.py",
+      "line": 1
+    },
+    {
+      "rule_id": "ADG020",
+      "path": "src/debug.py",
+      "line": 2
+    }
+  ]
+}

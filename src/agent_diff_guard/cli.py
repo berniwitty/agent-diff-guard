@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import sys
 from enum import StrEnum
+from pathlib import Path
 from typing import Annotated
 
 import typer
 
-from agent_diff_guard.engine import EXIT_USAGE
-from agent_diff_guard.rules.base import Severity, registry
+from agent_diff_guard.engine import EXIT_USAGE, exit_code, run_rules
+from agent_diff_guard.git import DiffSpec, Git, GitError
+from agent_diff_guard.report import text
+from agent_diff_guard.rules import registry
+from agent_diff_guard.rules.base import RunContext, Severity
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -27,23 +32,70 @@ class OutputFormat(StrEnum):
 @app.command()
 def check(
     base: Annotated[
-        str | None, typer.Option("--base", help="Compare HEAD against this revision.")
+        str | None,
+        typer.Option("--base", help="Check changes since HEAD (or --head) forked from REV."),
     ] = None,
-    staged: Annotated[bool, typer.Option("--staged", help="Check staged changes.")] = False,
+    head: Annotated[
+        str | None,
+        typer.Option("--head", help="Check up to this commit instead of the working tree."),
+    ] = None,
+    staged: Annotated[
+        bool, typer.Option("--staged", help="Check staged changes against HEAD.")
+    ] = False,
     output_format: Annotated[
         OutputFormat, typer.Option("--format", help="Report format.")
     ] = OutputFormat.TEXT,
     fail_on: Annotated[
         Severity, typer.Option("--fail-on", help="Lowest severity that makes the exit code 1.")
     ] = Severity.ERROR,
+    repo: Annotated[
+        Path, typer.Option("--repo", help="Path inside the git repository to check.")
+    ] = Path("."),
 ) -> None:
-    """Check a diff for shortcut patterns."""
-    if base is not None and staged:
+    """Check a diff for shortcut patterns.
+
+    With no options, checks uncommitted changes (staged, unstaged and untracked)
+    against HEAD.
+    """
+    if staged and base is not None:
         raise typer.BadParameter("--base and --staged cannot be used together.")
-    if registry.all():
-        typer.echo("adg check: reading changes from git is not implemented yet.", err=True)
+    if staged and head is not None:
+        raise typer.BadParameter("--head and --staged cannot be used together.")
+    if head is not None and base is None:
+        raise typer.BadParameter("--head requires --base.")
+    if output_format is not OutputFormat.TEXT:
+        typer.echo(f"adg check: --format {output_format} is not implemented yet.", err=True)
         raise typer.Exit(code=EXIT_USAGE)
-    typer.echo("adg check: no rules are registered; nothing was checked.")
+    try:
+        git = Git.discover(repo)
+        changes = git.changed_files(_diff_spec(git, base, head, staged))
+    except GitError as exc:
+        _emit(f"adg check: {exc}", err=True)
+        raise typer.Exit(code=EXIT_USAGE) from exc
+    rules = registry.all()
+    findings = run_rules(rules, RunContext(changes=tuple(changes)))
+    _emit(text.render(findings, files_checked=len(changes), rules_run=len(rules)))
+    raise typer.Exit(code=exit_code(findings, fail_on))
+
+
+def _emit(message: str, err: bool = False) -> None:
+    """Echo ``message``, escaping characters the stream's encoding cannot represent.
+
+    Evidence is copied from user code; on a console using e.g. GBK or cp1252, an emoji in
+    a string literal must not crash the report.
+    """
+    stream = sys.stderr if err else sys.stdout
+    encoding = getattr(stream, "encoding", None) or "utf-8"
+    safe = message.encode(encoding, errors="backslashreplace").decode(encoding)
+    typer.echo(safe, err=err)
+
+
+def _diff_spec(git: Git, base: str | None, head: str | None, staged: bool) -> DiffSpec:
+    if staged:
+        return git.staged()
+    if base is not None:
+        return git.range_from_base(base, head)
+    return git.working_tree()
 
 
 @app.command("rules")

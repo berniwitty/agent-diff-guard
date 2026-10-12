@@ -1,0 +1,9 @@
+{
+  "findings": [
+    {
+      "rule_id": "ADG002",
+      "path": "tests/test_calc.py",
+      "line": 9
+    }
+  ]
+}
