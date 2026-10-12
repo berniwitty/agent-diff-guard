@@ -290,3 +290,8 @@ def test_read_at_returns_text_or_none(tmp_path: Path) -> None:
     assert g.read_at(repo.base, "pkg") is None
     assert g.read_at("HEAD", "vendor") is None
     assert g.read_at(repo.base, "*.toml") is None
+
+
+def test_missing_directory_is_reported_as_such(tmp_path: Path) -> None:
+    with pytest.raises(GitError, match="is not a directory"):
+        Git.discover(tmp_path / "missing")

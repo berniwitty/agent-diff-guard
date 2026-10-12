@@ -1,4 +1,5 @@
-"""R2 implementation hollowing: ADG010 stub-body, ADG011 hardcoded-test-value."""
+"""R2 implementation hollowing: ADG010 stub-body, ADG011 hardcoded-test-value,
+ADG012 exception-swallowed."""
 
 from __future__ import annotations
 
@@ -9,6 +10,7 @@ from agent_diff_guard.astutil import (
     FunctionNode,
     body_without_docstring,
     branch_conditions,
+    excess_sites,
     functions,
     import_aliases,
     is_stub_body,
@@ -16,6 +18,7 @@ from agent_diff_guard.astutil import (
     resolved_name,
     source_line,
     special_cases,
+    swallowing_handlers,
 )
 from agent_diff_guard.change import ChangedFile
 from agent_diff_guard.classify import is_python_file
@@ -141,5 +144,38 @@ def _shown(literal_key: str) -> str:
     return literal_key.split(":", 1)[1]
 
 
+class SwallowedExceptionRule:
+    id = "ADG012"
+    name = "exception-swallowed"
+    default_severity = Severity.WARN
+
+    def check(self, change: ChangedFile, ctx: RunContext) -> list[Finding]:
+        if not is_python_file(change.path):
+            return []
+        head, base = parse(change.head_src), parse(change.base_src)
+        if head is None or change.head_src is None or (change.base_src and base is None):
+            return []
+        after = swallowing_handlers(head, import_aliases(head))
+        before = swallowing_handlers(base, import_aliases(base)) if base is not None else []
+        clauses = {handler.line: handler.clause for handler in after}
+        new = excess_sites(
+            (handler.key for handler in before),
+            [(handler.key, handler.line) for handler in after],
+            change.added_lines,
+        )
+        return [
+            Finding(
+                rule_id=self.id,
+                severity=self.default_severity,
+                path=change.path,
+                line=line,
+                message=f"Added `{clauses[line]}` handler that silently discards the error.",
+                evidence=source_line(change.head_src, line),
+            )
+            for _, line in new
+        ]
+
+
 registry.register(StubBodyRule())
 registry.register(HardcodedTestValueRule())
+registry.register(SwallowedExceptionRule())

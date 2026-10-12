@@ -1,12 +1,24 @@
-"""R3 suppression: ADG020 suppression-added, ADG099 suppression-without-reason."""
+"""R3 suppression: ADG020 suppression-added, ADG021 gate-loosened,
+ADG099 suppression-without-reason."""
 
 from __future__ import annotations
 
 import re
+from pathlib import PurePosixPath
 
-from agent_diff_guard.astutil import comments, excess_sites, source_line
+from agent_diff_guard.astutil import Site, comments, excess_sites, source_line
 from agent_diff_guard.change import ChangedFile
 from agent_diff_guard.classify import is_python_file
+from agent_diff_guard.gates import (
+    CONTINUE_ON_ERROR,
+    INI_FILES,
+    OR_TRUE,
+    Gates,
+    from_ini,
+    from_pyproject,
+    strip_yaml_comment,
+    workflow_tool_counts,
+)
 from agent_diff_guard.rules.base import Finding, RunContext, Severity, registry
 from agent_diff_guard.suppress import parse_allows
 
@@ -92,5 +104,116 @@ class SuppressionWithoutReasonRule:
         ]
 
 
+class GateLoosenedRule:
+    id = "ADG021"
+    name = "gate-loosened"
+    default_severity = Severity.ERROR
+
+    def check(self, change: ChangedFile, ctx: RunContext) -> list[Finding]:
+        path = PurePosixPath(change.path)
+        if path.parts[-3:-1] == (".github", "workflows") and path.suffix in (".yml", ".yaml"):
+            found = _workflow_loosening(change)
+        elif path.name == "pyproject.toml" or path.name in INI_FILES:
+            found = _config_loosening(change, path.name)
+        else:
+            return []
+        return [
+            Finding(self.id, self.default_severity, change.path, line, message, evidence)
+            for line, message, evidence in found
+        ]
+
+
+_Loosening = tuple[int | None, str, str]
+
+
+def _config_loosening(change: ChangedFile, filename: str) -> list[_Loosening]:
+    def gates(text: str | None) -> Gates | None:
+        if text is None:
+            return Gates()
+        return from_pyproject(text) if filename == "pyproject.toml" else from_ini(text, filename)
+
+    before, after = gates(change.base_src), gates(change.head_src)
+    if before is None or after is None:
+        return []
+    head = change.head_src or ""
+    found: list[_Loosening] = []
+
+    def report(needle: str, message: str, present: bool = True) -> None:
+        line = _line_with(head, needle, change.added_lines) if present else None
+        evidence = source_line(head, line) if line else f"{needle} (removed)"
+        found.append((line, message, evidence))
+
+    if before.fail_under is not None:
+        if after.fail_under is None:
+            report("fail_under", f"Coverage fail_under ({before.fail_under:g}) was removed.", False)
+        elif after.fail_under < before.fail_under:
+            report(
+                "fail_under",
+                f"Coverage fail_under lowered from {before.fail_under:g} to {after.fail_under:g}.",
+            )
+    for entry in sorted(after.ruff_ignores - before.ruff_ignores):
+        pattern, _, code = entry.rpartition(":")
+        if pattern:
+            report(pattern, f"Added ruff per-file ignore `{code}` for `{pattern}`.")
+        else:
+            report(code, f"Added ruff ignore `{code}`.")
+    if before.mypy_strict and not after.mypy_strict:
+        report("strict", "Turned off mypy strict mode.", "strict" in head)
+    for entry in sorted(after.mypy_disabled_codes - before.mypy_disabled_codes):
+        module, _, code = entry.partition(":")
+        scope = "" if module == "*" else f" for `{module}`"
+        report(code, f"Disabled mypy error code `{code}`{scope}.")
+    for module in sorted(after.mypy_ignore_errors - before.mypy_ignore_errors):
+        scope = "everywhere" if module == "*" else f"for `{module}`"
+        report("ignore_errors", f"Set mypy `ignore_errors` {scope}.")
+    return found
+
+
+def _workflow_loosening(change: ChangedFile) -> list[_Loosening]:
+    base, head = change.base_src or "", change.head_src or ""
+    found: list[_Loosening] = []
+    before, after = workflow_tool_counts(base), workflow_tool_counts(head)
+    for tool in sorted(before):
+        if after[tool] < before[tool]:
+            message = (
+                f"Workflow no longer runs `{tool}`."
+                if after[tool] == 0
+                else f"Workflow runs `{tool}` fewer times ({before[tool]} -> {after[tool]})."
+            )
+            evidence = next(
+                (line.strip() for line in base.splitlines() if tool in strip_yaml_comment(line)),
+                tool,
+            )
+            found.append((None, message, f"removed: {evidence}"))
+    for pattern, message in (
+        (CONTINUE_ON_ERROR, "Added `continue-on-error: true` to a workflow step."),
+        (OR_TRUE, "A workflow command now ignores its exit status with `|| true`."),
+    ):
+        for _, line in excess_sites(
+            (key for key, _ in _pattern_sites(pattern, base)),
+            _pattern_sites(pattern, head),
+            change.added_lines,
+        ):
+            found.append((line, message, source_line(head, line)))
+    return found
+
+
+def _pattern_sites(pattern: re.Pattern[str], text: str) -> list[Site]:
+    return [
+        (pattern.pattern, number)
+        for number, line in enumerate(text.splitlines(), 1)
+        if pattern.search(strip_yaml_comment(line))
+    ]
+
+
+def _line_with(source: str, needle: str, added: frozenset[int]) -> int | None:
+    """First line containing ``needle``, preferring added lines."""
+    lines = [n for n, text in enumerate(source.splitlines(), 1) if needle in text]
+    preferred = [n for n in lines if n in added]
+    candidates = preferred or lines
+    return candidates[0] if candidates else None
+
+
 registry.register(SuppressionAddedRule())
 registry.register(SuppressionWithoutReasonRule())
+registry.register(GateLoosenedRule())

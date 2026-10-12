@@ -211,7 +211,10 @@ def test_check_reads_config_from_base_revision(tmp_path: Path) -> None:
         "src/calc.py:1: warn ADG010 Function `add` had real logic and now has a stub body."
     )
     assert not any("ADG020" in line or "vendor/" in line for line in lines)
-    assert lines[-1].startswith("Checked 4 changed file(s) with 7 rule(s): 0 error, 1 warn")
+    enabled = len(registry.all()) - 1  # ADG020 is disabled by the base config
+    assert (
+        lines[-1] == f"Checked 4 changed file(s) with {enabled} rule(s): 0 error, 1 warn, 0 info."
+    )
     explicit = runner.invoke(
         cli.app, ["check", "--repo", str(repo.path), "--base", repo.base, "--fail-on", "error"]
     )
@@ -295,3 +298,25 @@ def test_emit_escapes_characters_the_stream_cannot_encode(
     stream.flush()
     # GBK has no emoji, so it is escaped; "é" exists in GBK and is kept as is.
     assert raw.getvalue().decode("gbk") == "return '\\U0001f44b héllo'\n"
+
+
+def test_check_with_coverage_report(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path, {"src/calc.py": CALC}, {"src/calc.py": CALC + "LIMIT = 10\n"})
+    report = tmp_path / "coverage.xml"
+    report.write_text(
+        "<coverage><sources><source>.</source></sources><packages><package><classes>"
+        '<class filename="src/calc.py"><lines><line number="3" hits="0"/></lines></class>'
+        "</classes></package></packages></coverage>",
+        encoding="utf-8",
+    )
+    args = ["check", "--repo", str(repo.path), "--base", repo.base]
+
+    with_report = runner.invoke(cli.app, [*args, "--coverage", str(report)])
+    without = runner.invoke(cli.app, args)
+    broken = runner.invoke(cli.app, [*args, "--coverage", str(tmp_path / "missing.xml")])
+
+    assert with_report.exit_code == 0
+    assert "src/calc.py:3: info ADG040 Added line 3 is not executed" in plain(with_report)
+    assert "ADG040" not in plain(without)
+    assert broken.exit_code == 2
+    assert "cannot read coverage report" in plain(broken)

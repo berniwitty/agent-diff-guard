@@ -1,0 +1,9 @@
+{
+  "findings": [
+    {
+      "rule_id": "ADG021",
+      "path": ".github/workflows/ci.yaml",
+      "line": 11
+    }
+  ]
+}

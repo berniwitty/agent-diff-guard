@@ -1,0 +1,14 @@
+{
+  "findings": [
+    {
+      "rule_id": "ADG021",
+      "path": "setup.cfg",
+      "line": 5
+    },
+    {
+      "rule_id": "ADG021",
+      "path": "setup.cfg",
+      "line": 8
+    }
+  ]
+}

@@ -1,0 +1,80 @@
+name: agent-diff-guard
+description: Flag shortcut patterns coding agents use to make a change look done.
+branding:
+  icon: shield
+  color: orange
+
+inputs:
+  base:
+    description: >-
+      Revision to compare against. Defaults to the pull request's base commit, or the
+      previous commit on push events. The checkout needs enough history (fetch-depth: 0).
+    required: false
+    default: ""
+  fail-on:
+    description: Lowest severity that fails the step (info, warn, error). Defaults to config, else error.
+    required: false
+    default: ""
+  coverage:
+    description: Optional Cobertura XML report (for example coverage.xml) to enable ADG040.
+    required: false
+    default: ""
+  upload-sarif:
+    description: Upload findings to code scanning so they show as annotations ("true"/"false").
+    required: false
+    default: "true"
+
+outputs:
+  exit-code:
+    description: adg's exit code (0 clean, 1 findings at or above fail-on, 2 usage error).
+    value: ${{ steps.adg.outputs.exit-code }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install agent-diff-guard
+      shell: bash
+      run: |
+        python3 -m venv "$RUNNER_TEMP/adg-venv"
+        "$RUNNER_TEMP/adg-venv/bin/python" -m pip install --quiet "$GITHUB_ACTION_PATH"
+
+    - name: Run agent-diff-guard
+      id: adg
+      shell: bash
+      env:
+        INPUT_BASE: ${{ inputs.base }}
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        INPUT_COVERAGE: ${{ inputs.coverage }}
+        PR_BASE: ${{ github.event.pull_request.base.sha }}
+        PUSH_BEFORE: ${{ github.event.before }}
+      run: |
+        base="${INPUT_BASE:-${PR_BASE:-$PUSH_BEFORE}}"
+        if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+          base="HEAD~1"
+        fi
+        args=(check --base "$base" --head HEAD)
+        if [ -n "$INPUT_FAIL_ON" ]; then args+=(--fail-on "$INPUT_FAIL_ON"); fi
+        if [ -n "$INPUT_COVERAGE" ]; then args+=(--coverage "$INPUT_COVERAGE"); fi
+        adg="$RUNNER_TEMP/adg-venv/bin/adg"
+
+        set +e
+        "$adg" "${args[@]}" --format sarif > "$RUNNER_TEMP/adg.sarif"
+        code=$?
+        "$adg" "${args[@]}" --format markdown >> "$GITHUB_STEP_SUMMARY"
+        "$adg" "${args[@]}" --format text
+        set -e
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+        echo "sarif=$RUNNER_TEMP/adg.sarif" >> "$GITHUB_OUTPUT"
+
+    - name: Upload SARIF
+      if: inputs.upload-sarif == 'true' && steps.adg.outputs.exit-code != '2'
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ steps.adg.outputs.sarif }}
+        category: agent-diff-guard
+
+    - name: Fail on findings
+      shell: bash
+      env:
+        CODE: ${{ steps.adg.outputs.exit-code }}
+      run: exit "$CODE"

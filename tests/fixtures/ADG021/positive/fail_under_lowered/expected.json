@@ -1,0 +1,9 @@
+{
+  "findings": [
+    {
+      "rule_id": "ADG021",
+      "path": "pyproject.toml",
+      "line": 6
+    }
+  ]
+}

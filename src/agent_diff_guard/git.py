@@ -268,6 +268,8 @@ class Git:
 
 def _run(cwd: Path, args: list[str], stdin: str | None = None) -> bytes:
     data = stdin.encode("ascii") if stdin is not None else None
+    if not cwd.is_dir():
+        raise GitError(f"{cwd} is not a directory")
     try:
         proc = subprocess.run(["git", *args], cwd=cwd, input=data, capture_output=True, check=False)
     except FileNotFoundError as exc:

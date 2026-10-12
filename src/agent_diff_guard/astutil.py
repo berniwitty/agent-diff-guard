@@ -572,3 +572,99 @@ def _special_case(
             compared = frozenset(key for key in keys if key is not None)
             return SpecialCase(line, ast.unparse(test), left.id, compared, returned)
     return None
+
+
+# ---------------------------------------------------------------------------- handlers
+
+
+@dataclass(frozen=True)
+class SwallowingHandler:
+    """A catch-all ``except`` whose body discards the error."""
+
+    line: int
+    clause: str  # "except:" or "except Exception:"
+    key: str  # clause and body, to match the same handler between revisions
+
+
+def swallowing_handlers(module: ast.Module, aliases: dict[str, str]) -> list[SwallowingHandler]:
+    found = []
+    for node in ast.walk(module):
+        if not isinstance(node, ast.ExceptHandler) or not _catches_everything(node.type, aliases):
+            continue
+        if node.body and all(_discards(stmt) for stmt in node.body):
+            clause = "except:" if node.type is None else f"except {ast.unparse(node.type)}:"
+            body = "; ".join(ast.unparse(stmt) for stmt in node.body)
+            found.append(SwallowingHandler(node.lineno, clause, f"{clause} {body}"))
+    return sorted(found, key=lambda handler: handler.line)
+
+
+def _catches_everything(kind: ast.expr | None, aliases: dict[str, str]) -> bool:
+    if kind is None:
+        return True
+    candidates = kind.elts if isinstance(kind, ast.Tuple) else [kind]
+    for candidate in candidates:
+        name = resolved_name(candidate, aliases)
+        if name is not None and name.rsplit(".", 1)[-1] in _BROAD_EXCEPTIONS:
+            return True
+    return False
+
+
+def _discards(stmt: ast.stmt) -> bool:
+    if isinstance(stmt, ast.Pass):
+        return True
+    if isinstance(stmt, ast.Expr):
+        return isinstance(stmt.value, ast.Constant) and stmt.value.value is Ellipsis
+    if isinstance(stmt, ast.Return):
+        return stmt.value is None or isinstance(stmt.value, ast.Constant) or is_literal(stmt.value)
+    return False
+
+
+# ---------------------------------------------------------------------------- mocking
+
+
+def from_imports(module: ast.Module) -> dict[str, str]:
+    """Names bound by ``from <module> import <name> [as <local>]``: local -> original name."""
+    names = {}
+    for node in ast.walk(module):
+        if isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            for alias in node.names:
+                if alias.name != "*":
+                    names[alias.asname or alias.name] = alias.name
+    return names
+
+
+_PATCH_SUFFIXES = ("mock.patch", "mocker.patch")
+_PATCH_OBJECT_SUFFIXES = ("patch.object",)
+
+
+def patch_targets(node: FunctionNode, aliases: dict[str, str]) -> list[tuple[str, int]]:
+    """(patched attribute name, line) for mock/monkeypatch patches in a test function."""
+    calls = [d for d in node.decorator_list if isinstance(d, ast.Call)]
+    calls += [sub for sub in walk_skipping_definitions(node.body) if isinstance(sub, ast.Call)]
+    found = []
+    for call in calls:
+        name = resolved_name(call, aliases) or ""
+        target = _patched_name(name, call.args)
+        if target is not None:
+            found.append((target, call.lineno))
+    return sorted(found, key=lambda site: site[1])
+
+
+def _patched_name(callee: str, args: list[ast.expr]) -> str | None:
+    def string(index: int) -> str | None:
+        arg = args[index] if len(args) > index else None
+        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+            return arg.value
+        return None
+
+    if callee.endswith(_PATCH_OBJECT_SUFFIXES):
+        return string(1)
+    if callee == "patch" or callee.endswith(_PATCH_SUFFIXES):
+        dotted = string(0)
+        return dotted.rsplit(".", 1)[-1] if dotted else None
+    if callee == "monkeypatch.setattr":
+        dotted = string(0)
+        if dotted is not None and "." in dotted and len(args) == 2:
+            return dotted.rsplit(".", 1)[-1]
+        return string(1)
+    return None

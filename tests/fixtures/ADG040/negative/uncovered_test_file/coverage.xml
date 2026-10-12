@@ -1,0 +1,20 @@
+<?xml version="1.0" ?>
+<coverage version="7.6.0">
+  <sources>
+    <source>.</source>
+  </sources>
+  <packages>
+    <package name="src">
+      <classes>
+        <class name="test_refund.py" filename="tests/test_refund.py">
+          <lines>
+          <line number="1" hits="1"/>
+          <line number="2" hits="1"/>
+          <line number="3" hits="0"/>
+          <line number="4" hits="1"/>
+          </lines>
+        </class>
+      </classes>
+    </package>
+  </packages>
+</coverage>
