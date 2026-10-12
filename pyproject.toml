@@ -1,12 +1,30 @@
 [project]
-name = "agent-diff-guard"
-version = "0.0.0"
+# "agent-diff-guard" is taken on PyPI; the command (adg) and import name are unchanged.
+name = "shortcut-guard"
+dynamic = ["version"]
 description = "Catch the shortcuts coding agents take to make a task look done."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
+keywords = ["ai-agents", "code-review", "git", "linter", "testing"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Testing",
+]
 dependencies = [
     "typer>=0.27.3",
 ]
+
+[project.urls]
+Repository = "https://github.com/berniwitty/agent-diff-guard"
 
 [project.scripts]
 adg = "agent_diff_guard.cli:app"
@@ -14,6 +32,9 @@ adg = "agent_diff_guard.cli:app"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/agent_diff_guard/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent_diff_guard"]

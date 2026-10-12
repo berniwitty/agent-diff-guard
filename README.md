@@ -21,6 +21,15 @@ Status: pre-release. Implemented rules:
 | [ADG040](docs/rules/ADG040.md) | uncovered-change (needs `--coverage`) | info |
 | [ADG099](docs/rules/ADG099.md) | suppression-without-reason | warn |
 
+## Install
+
+```bash
+pip install shortcut-guard   # provides the `adg` command
+```
+
+The distribution is called `shortcut-guard` because `agent-diff-guard` was already taken
+on PyPI; the command (`adg`) and the import package (`agent_diff_guard`) keep this name.
+
 ## Usage
 
 ```bash
@@ -94,3 +103,7 @@ uv run ruff check . && uv run ruff format --check .
 uv run mypy --strict src
 uv run adg check --base origin/main
 ```
+
+## License
+
+MIT, see [LICENSE](LICENSE).
