@@ -204,7 +204,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     report = render_markdown(results, stats)
     (args.out / "RESULTS.md").write_text(report, encoding="utf-8")
-    print(report)
+    print(f"Wrote {args.out / 'RESULTS.md'} and {args.out / 'results.json'}")
     return 0
 
 

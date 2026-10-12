@@ -89,7 +89,26 @@ make eval-commits   # pin candidate commits in eval/commits.txt (uv run python -
 make eval           # write eval/results/RESULTS.md           (uv run python -m eval.run)
 ```
 
-Results: not run yet. They will be added here once the corpus is pinned.
+Results on 300 commits from httpx, pydantic and rich (details and every flagged original
+commit: [docs/evaluation.md](docs/evaluation.md)):
+
+| Rule | Severity | Injected | Detected | Recall | Originals flagged | FP rate |
+|---|---|---|---|---|---|---|
+| ADG001 | error | 300 | 297 | 99% | 24 | 8.0% ⚠ |
+| ADG002 | error | 300 | 300 | 100% | 2 | 0.7% |
+| ADG003 | error | 300 | 298 | 99% | 11 | 3.7% |
+| ADG004 | warn | 23 | 23 | 100% | 1 | 0.3% |
+| ADG010 | error | 300 | 300 | 100% | 0 | 0.0% |
+| ADG011 | error | 300 | 300 | 100% | 0 | 0.0% |
+| ADG012 | warn | 300 | 300 | 100% | 3 | 1.0% |
+| ADG020 | warn | 300 | 299 | 100% | 38 | 12.7% |
+| ADG021 | error | 200 | 200 | 100% | 2 | 0.7% |
+| ADG030 | warn | 300 | 300 | 100% | 0 | 0.0% |
+| ADG040 | info | 0 | 0 | n/a | 0 | 0.0% |
+| ADG099 | warn | 300 | 300 | 100% | 0 | 0.0% |
+
+`error` rules meet the ≤ 5% false-positive target except **ADG001 (8.0%)**, whose flags
+on honest commits are feature removals and test rewrites; see the analysis.
 
 Injected shortcuts are more canonical than the shortcuts real agents take, so recall
 on them is an optimistic upper bound.
