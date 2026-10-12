@@ -206,7 +206,7 @@ def test_run_main_end_to_end(tmp_path: Path, honest_commit: tuple[Git, str, str]
     assert (out / "p" / "RESULTS.md").read_text(encoding="utf-8") == (out / "RESULTS.md").read_text(
         encoding="utf-8"
     )
-    assert "| ADG001 | error | 1 | 1 | 100% | 0 | 0.0% |" in (out / "RESULTS.md").read_text(
+    assert "| ADG001 | warn | 1 | 1 | 100% | 0 | 0.0% |" in (out / "RESULTS.md").read_text(
         encoding="utf-8"
     )
     assert '"sha": "' + head in (out / "results.json").read_text(encoding="utf-8")

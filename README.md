@@ -4,11 +4,11 @@
 to make a task "look done": deleted tests, weakened assertions, stubbed functions,
 hard-coded answers, silenced checks. See [SPEC.md](SPEC.md).
 
-Status: pre-release. Implemented rules:
+Status: v0.1.0. Rules:
 
 | ID | Name | Default |
 |----|------|---------|
-| [ADG001](docs/rules/ADG001.md) | test-removed | error |
+| [ADG001](docs/rules/ADG001.md) | test-removed | warn |
 | [ADG002](docs/rules/ADG002.md) | test-skipped | error |
 | [ADG003](docs/rules/ADG003.md) | assertion-weakened | error |
 | [ADG004](docs/rules/ADG004.md) | expected-value-edited | warn |
@@ -107,8 +107,9 @@ commit: [docs/evaluation.md](docs/evaluation.md)):
 | ADG040 | info | 0 | 0 | n/a | 0 | 0.0% |
 | ADG099 | warn | 300 | 300 | 100% | 0 | 0.0% |
 
-`error` rules meet the ≤ 5% false-positive target except **ADG001 (8.0%)**, whose flags
-on honest commits are feature removals and test rewrites; see the analysis.
+Every rule that is `error` by default meets the ≤ 5% false-positive target. ADG001 was
+measured as `error` (8.0%, feature removals and test rewrites) and is `warn` by default
+since v0.1.0; see the analysis.
 
 Injected shortcuts are more canonical than the shortcuts real agents take, so recall
 on them is an optimistic upper bound.

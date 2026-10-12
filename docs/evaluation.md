@@ -1,5 +1,9 @@
 # Evaluation (v0.1)
 
+> After this evaluation ADG001's default severity was changed from `error` to `warn`
+> because of its 8.0% false-positive rate. The numbers below were measured with it at
+> `error`; severity does not change what a rule detects.
+
 Corpus: 300 commits, the 100 most recent non-merge commits that change both Python source
 and Python tests in each of [httpx](https://github.com/encode/httpx),
 [pydantic](https://github.com/pydantic/pydantic) and [rich](https://github.com/Textualize/rich),

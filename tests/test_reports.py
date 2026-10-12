@@ -86,8 +86,9 @@ def test_sarif_report() -> None:
         "shortDescription": {"text": "stub body"},
         "defaultConfiguration": {"level": "error"},
     }
+    # ADG001 is warn by default since v0.1.0 (decided after the evaluation).
     assert [r["defaultConfiguration"]["level"] for r in driver["rules"]] == [
-        "error",
+        "warning",
         "error",
         "warning",
     ]

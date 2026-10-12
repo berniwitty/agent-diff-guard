@@ -191,7 +191,9 @@ SAME_VALUES = 0.5
 class RemovedTestRule:
     id = "ADG001"
     name = "test-removed"
-    default_severity = Severity.ERROR
+    # warn, not error: removals that go with a removed feature or a rewrite are common in
+    # honest changes (8% of evaluated commits, docs/evaluation.md).
+    default_severity = Severity.WARN
 
     def check(self, change: ChangedFile, ctx: RunContext) -> list[Finding]:
         if not ctx.is_python_test(change.path) or change.base_src is None:
