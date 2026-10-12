@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import re
 import sys
 from collections.abc import Iterable
@@ -133,10 +134,96 @@ def test_check_rejects_head_with_staged() -> None:
     assert "cannot be used together" in plain(result)
 
 
-def test_check_unimplemented_format_is_usage_error() -> None:
-    result = runner.invoke(cli.app, ["check", "--format", "json"])
+# test_check_unimplemented_format_is_usage_error asserted the pre-M3 placeholder
+# ("--format json is not implemented yet"). The formats exist now; these tests replace it.
+# adg: allow ADG001 reason="placeholder test for unimplemented --format replaced by format tests"
+
+
+@pytest.mark.parametrize("output_format", ["json", "sarif"])
+def test_check_machine_formats_are_valid_json(tmp_path: Path, output_format: str) -> None:
+    repo = make_repo(tmp_path, {"src/calc.py": CALC}, {"src/calc.py": STUBBED})
+    result = runner.invoke(
+        cli.app,
+        ["check", "--repo", str(repo.path), "--base", repo.base, "--format", output_format],
+    )
+    assert result.exit_code == 1
+    data = json.loads(result.output)
+    assert "ADG010" in json.dumps(data)
+
+
+def test_check_markdown_format(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path, {"src/calc.py": CALC}, {"src/calc.py": STUBBED})
+    result = runner.invoke(
+        cli.app, ["check", "--repo", str(repo.path), "--base", repo.base, "--format", "markdown"]
+    )
+    assert result.exit_code == 1
+    assert result.output.startswith("## agent-diff-guard\n")
+    assert "| error | ADG010 | `src/calc.py:1` |" in result.output
+
+
+ALLOWED = 'def add(a, b):  # adg: allow ADG010 reason="kept for API v1"\n    pass\n'
+
+
+def test_check_inline_allow_with_reason_suppresses(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path, {"src/calc.py": CALC}, {"src/calc.py": ALLOWED})
+    result = runner.invoke(cli.app, ["check", "--repo", str(repo.path), "--base", repo.base])
+    assert result.exit_code == 0
+    assert plain(result).splitlines()[:3] == [
+        "Suppressed (1):",
+        "  src/calc.py:1: ADG010 Function `add` had real logic and now has a stub body.",
+        '    reason: "kept for API v1"',
+    ]
+
+
+def test_check_inline_allow_without_reason_suppresses_nothing(tmp_path: Path) -> None:
+    no_reason = "def add(a, b):  # adg: allow ADG010\n    pass\n"
+    repo = make_repo(tmp_path, {"src/calc.py": CALC}, {"src/calc.py": no_reason})
+    result = runner.invoke(cli.app, ["check", "--repo", str(repo.path), "--base", repo.base])
+    assert result.exit_code == 1
+    assert "src/calc.py:1: error ADG010" in plain(result)
+    assert "src/calc.py:1: warn ADG099" in plain(result)
+
+
+CONFIG = """\
+[tool.agent-diff-guard]
+exclude = ["vendor/"]
+disable = ["ADG020"]
+severity = { ADG010 = "warn" }
+fail-on = "warn"
+"""
+
+
+def test_check_reads_config_from_base_revision(tmp_path: Path) -> None:
+    before = {"pyproject.toml": CONFIG, "src/calc.py": CALC, "vendor/lib.py": CALC}
+    after = {
+        "pyproject.toml": "[tool.agent-diff-guard]\ndisable = ['ADG010']\n",
+        "src/calc.py": STUBBED,
+        "src/extra.py": NOQA,
+        "vendor/lib.py": STUBBED,
+    }
+    repo = make_repo(tmp_path, before, after)
+    result = runner.invoke(cli.app, ["check", "--repo", str(repo.path), "--base", repo.base])
+    lines = plain(result).splitlines()
+    # Base config applies: ADG010 downgraded to warn (head's attempt to disable it is
+    # ignored), ADG020 disabled, vendor/ excluded, and fail-on=warn makes this exit 1.
+    assert result.exit_code == 1
+    assert lines[0] == (
+        "src/calc.py:1: warn ADG010 Function `add` had real logic and now has a stub body."
+    )
+    assert not any("ADG020" in line or "vendor/" in line for line in lines)
+    assert lines[-1].startswith("Checked 4 changed file(s) with 7 rule(s): 0 error, 1 warn")
+    explicit = runner.invoke(
+        cli.app, ["check", "--repo", str(repo.path), "--base", repo.base, "--fail-on", "error"]
+    )
+    assert explicit.exit_code == 0
+
+
+def test_check_invalid_config_is_usage_error(tmp_path: Path) -> None:
+    bad = "[tool.agent-diff-guard]\ndisable = ['ADG999']\n"
+    repo = make_repo(tmp_path, {"pyproject.toml": bad}, {"pyproject.toml": bad, "a.py": CALC})
+    result = runner.invoke(cli.app, ["check", "--repo", str(repo.path), "--base", repo.base])
     assert result.exit_code == 2
-    assert "--format json is not implemented yet" in plain(result)
+    assert "disable names unknown rule(s): ADG999" in plain(result)
 
 
 def test_check_rejects_base_with_staged() -> None:
@@ -165,10 +252,27 @@ def test_rules_lists_id_name_and_severity() -> None:
 
 
 @pytest.mark.usefixtures("one_rule_registry")
-def test_explain_known_rule_is_case_insensitive() -> None:
+def test_explain_known_rule_is_case_insensitive(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Without a docs page, explain falls back to the rule's header line.
+    monkeypatch.setattr(cli, "rule_doc", lambda rule_id: None)
     result = runner.invoke(cli.app, ["explain", "adg002"])
     assert result.exit_code == 0
     assert plain(result).strip() == "ADG002 test-skipped (default severity: error)"
+
+
+def test_explain_prints_the_rule_docs_page() -> None:
+    result = runner.invoke(cli.app, ["explain", "ADG010"])
+    assert result.exit_code == 0
+    assert plain(result).startswith("# ADG010 — stub-body\n")
+    assert "## Example — flagged" in plain(result)
+
+
+def test_rule_doc_prefers_packaged_docs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    (tmp_path / "rule_docs").mkdir()
+    (tmp_path / "rule_docs" / "ADG010.md").write_text("packaged", encoding="utf-8")
+    monkeypatch.setattr(cli.resources, "files", lambda package: tmp_path)
+    assert cli.rule_doc("ADG010") == "packaged"
+    assert cli.rule_doc("ADG999") is None
 
 
 @pytest.mark.usefixtures("empty_registry")

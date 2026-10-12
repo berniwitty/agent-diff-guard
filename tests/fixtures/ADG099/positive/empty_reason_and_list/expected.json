@@ -1,0 +1,14 @@
+{
+  "findings": [
+    {
+      "rule_id": "ADG099",
+      "path": "src/hooks.py",
+      "line": 1
+    },
+    {
+      "rule_id": "ADG099",
+      "path": "src/hooks.py",
+      "line": 5
+    }
+  ]
+}

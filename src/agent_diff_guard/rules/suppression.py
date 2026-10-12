@@ -1,4 +1,4 @@
-"""R3 suppression: ADG020 suppression-added."""
+"""R3 suppression: ADG020 suppression-added, ADG099 suppression-without-reason."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from agent_diff_guard.astutil import comments, excess_sites, source_line
 from agent_diff_guard.change import ChangedFile
 from agent_diff_guard.classify import is_python_file
 from agent_diff_guard.rules.base import Finding, RunContext, Severity, registry
+from agent_diff_guard.suppress import parse_allows
 
 _DIRECTIVE = re.compile(
     r"""
@@ -69,4 +70,27 @@ def _key(text: str) -> str:
     return "".join(text.split()).lower()
 
 
+class SuppressionWithoutReasonRule:
+    id = "ADG099"
+    name = "suppression-without-reason"
+    default_severity = Severity.WARN
+
+    def check(self, change: ChangedFile, ctx: RunContext) -> list[Finding]:
+        if not is_python_file(change.path) or change.head_src is None:
+            return []
+        return [
+            Finding(
+                rule_id=self.id,
+                severity=self.default_severity,
+                path=change.path,
+                line=allow.line,
+                message=f"Suppression `{allow.text}` has no reason, so it suppresses nothing.",
+                evidence=source_line(change.head_src, allow.line),
+            )
+            for allow in parse_allows(change.head_src)
+            if allow.reason is None and allow.line in change.added_lines
+        ]
+
+
 registry.register(SuppressionAddedRule())
+registry.register(SuppressionWithoutReasonRule())

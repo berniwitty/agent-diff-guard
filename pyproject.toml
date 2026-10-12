@@ -18,6 +18,13 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent_diff_guard"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"docs/rules" = "agent_diff_guard/rule_docs"
+
+[tool.agent-diff-guard]
+# Fixture trees are rule inputs and contain the shortcuts adg reports, on purpose.
+exclude = ["tests/fixtures/"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"

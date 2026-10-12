@@ -1,20 +1,29 @@
-"""Plain-text report: one line per finding, evidence indented, then a summary."""
+"""Plain-text report: one line per finding, evidence indented, suppressions, a summary."""
 
 from __future__ import annotations
 
-from collections import Counter
-from collections.abc import Sequence
-
-from agent_diff_guard.rules.base import Finding, Severity
+from agent_diff_guard.engine import Outcome
+from agent_diff_guard.rules.base import Finding
 
 
-def render(findings: Sequence[Finding], files_checked: int, rules_run: int) -> str:
+def location(finding: Finding) -> str:
+    return finding.path if finding.line is None else f"{finding.path}:{finding.line}"
+
+
+def render(outcome: Outcome) -> str:
     lines = []
-    for finding in findings:
-        where = finding.path if finding.line is None else f"{finding.path}:{finding.line}"
-        lines.append(f"{where}: {finding.severity} {finding.rule_id} {finding.message}")
+    for finding in outcome.findings:
+        lines.append(f"{location(finding)}: {finding.severity} {finding.rule_id} {finding.message}")
         lines.extend(f"    {line}" for line in finding.evidence.splitlines())
-    counts = Counter(finding.severity for finding in findings)
-    tally = ", ".join(f"{counts[severity]} {severity}" for severity in reversed(Severity))
-    lines.append(f"Checked {files_checked} changed file(s) with {rules_run} rule(s): {tally}.")
+    if outcome.suppressed:
+        lines.append(f"Suppressed ({len(outcome.suppressed)}):")
+        for item in outcome.suppressed:
+            finding = item.finding
+            lines.append(f"  {location(finding)}: {finding.rule_id} {finding.message}")
+            lines.append(f'    reason: "{item.reason}"')
+    tally = ", ".join(f"{count} {severity}" for severity, count in outcome.counts().items())
+    lines.append(
+        f"Checked {outcome.files_checked} changed file(s) "
+        f"with {len(outcome.rules)} rule(s): {tally}."
+    )
     return "\n".join(lines)

@@ -8,9 +8,14 @@ Status: pre-release. Implemented rules:
 
 | ID | Name | Default |
 |----|------|---------|
+| [ADG001](docs/rules/ADG001.md) | test-removed | error |
 | [ADG002](docs/rules/ADG002.md) | test-skipped | error |
+| [ADG003](docs/rules/ADG003.md) | assertion-weakened | error |
+| [ADG004](docs/rules/ADG004.md) | expected-value-edited | warn |
 | [ADG010](docs/rules/ADG010.md) | stub-body | error |
+| [ADG011](docs/rules/ADG011.md) | hardcoded-test-value | error |
 | [ADG020](docs/rules/ADG020.md) | suppression-added | warn |
+| [ADG099](docs/rules/ADG099.md) | suppression-without-reason | warn |
 
 ## Usage
 
@@ -19,10 +24,39 @@ adg check                      # uncommitted changes (staged, unstaged, untracke
 adg check --staged             # staged changes vs HEAD
 adg check --base origin/main   # everything since the branch forked from origin/main
 adg check --base v1.0 --head v1.1
+adg check --format sarif > adg.sarif   # also: json, markdown
+adg explain ADG003
 ```
 
 Exit code: `0` no findings at or above `--fail-on` (default `error`), `1` findings,
 `2` usage or git error.
+
+## Suppressing a finding
+
+Put an allow comment with a reason on the flagged line:
+
+```python
+def legacy_hook(event):  # adg: allow ADG010 reason="kept for plugin API v1"
+    pass
+```
+
+A suppression without a non-empty reason suppresses nothing and is reported as ADG099.
+Every suppression is listed in the report. Findings without a line (a removed test) are
+suppressed by an allow for that rule anywhere in the file.
+
+## Configuration
+
+```toml
+[tool.agent-diff-guard]
+test-patterns = ["tests/", "test_*.py", "*_test.py", "conftest.py"]
+exclude = ["tests/fixtures/"]   # "dir/" prefixes or globs on the path
+disable = ["ADG004"]
+severity = { ADG020 = "error" }
+fail-on = "warn"                # --fail-on on the command line wins
+```
+
+Configuration is read from `pyproject.toml` **at the base revision**, so a change cannot
+loosen the checks applied to itself. A new setting takes effect once it is merged.
 
 ## Development
 

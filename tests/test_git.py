@@ -277,3 +277,16 @@ def test_blobs_reports_missing_objects(tmp_path: Path) -> None:
     with pytest.raises(GitError, match=f"cannot read blob {SHA_A}: {SHA_A} missing"):
         g._blobs([SHA_A])
     assert g._blobs([]) == {}
+
+
+def test_read_at_returns_text_or_none(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path, {"pyproject.toml": "[x]\n", "pkg/a.py": "a = 1\n"}, {})
+    git(repo.path, "update-index", "--add", "--cacheinfo", f"160000,{repo.base},vendor")
+    git(repo.path, "commit", "--quiet", "-m", "gitlink")
+    g = Git.discover(repo.path)
+
+    assert g.read_at(repo.base, "pyproject.toml") == "[x]\n"
+    assert g.read_at(repo.head, "pyproject.toml") is None
+    assert g.read_at(repo.base, "pkg") is None
+    assert g.read_at("HEAD", "vendor") is None
+    assert g.read_at(repo.base, "*.toml") is None
