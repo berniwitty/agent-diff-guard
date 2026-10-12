@@ -13,13 +13,17 @@ jobs:
   dogfood:
     name: passes on this change
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write  # SARIF upload to code scanning
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: ./
         with:
-          upload-sarif: "false"
+          # Fork PRs get a read-only token, so only pushes and same-repo PRs upload.
+          upload-sarif: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
 
   detects-shortcut:
     name: reports a planted shortcut

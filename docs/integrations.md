@@ -45,7 +45,8 @@ The action:
 
 This repository runs the action on itself in
 [`.github/workflows/action.yml`](../.github/workflows/action.yml): once on each change
-(must pass) and once on a commit with a planted stub (must report ADG010).
+(must pass, and uploads its SARIF so findings annotate this repository's PRs) and once on
+a commit with a planted stub (must report ADG010).
 
 Code scanning (the SARIF upload) needs GitHub Advanced Security on private repositories.
 Set `upload-sarif: "false"` if it is not available; the job summary and exit code still
