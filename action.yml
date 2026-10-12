@@ -23,6 +23,12 @@ inputs:
     description: Upload findings to code scanning so they show as annotations ("true"/"false").
     required: false
     default: "true"
+  fail-on-findings:
+    description: >-
+      Fail the step when there are findings at or above fail-on ("true"/"false"). With
+      "false" the step only reports (summary, SARIF, exit-code output); usage errors still fail.
+    required: false
+    default: "true"
 
 outputs:
   exit-code:
@@ -77,4 +83,9 @@ runs:
       shell: bash
       env:
         CODE: ${{ steps.adg.outputs.exit-code }}
-      run: exit "$CODE"
+        FAIL_ON_FINDINGS: ${{ inputs.fail-on-findings }}
+      run: |
+        if [ "$CODE" = "2" ] || [ "$FAIL_ON_FINDINGS" != "false" ]; then
+          exit "$CODE"
+        fi
+        echo "agent-diff-guard exit code $CODE (fail-on-findings is false)"

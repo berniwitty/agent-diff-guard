@@ -1,0 +1,56 @@
+name: Action
+
+# Runs the composite action in this repository (action.yml) the way users run it.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  dogfood:
+    name: passes on this change
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ./
+        with:
+          upload-sarif: "false"
+
+  detects-shortcut:
+    name: reports a planted shortcut
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Commit a stubbed function
+        # eval/ is not part of the installed package, so stubbing it leaves adg intact.
+        run: |
+          git config user.name ci
+          git config user.email ci@invalid
+          python3 - <<'PY'
+          import pathlib
+          path = pathlib.Path("eval/fetch.py")
+          text = path.read_text()
+          start = text.index("def read_repos")
+          end = text.index("\n\n\ndef ", start)
+          path.write_text(text[:start] + "def read_repos(path):\n    pass" + text[end:])
+          PY
+          git commit --quiet --all --message "plant a stub"
+      - id: adg
+        uses: ./
+        with:
+          base: HEAD~1
+          upload-sarif: "false"
+          fail-on-findings: "false"
+      - name: Expect findings
+        env:
+          CODE: ${{ steps.adg.outputs.exit-code }}
+        run: |
+          echo "adg exit code: $CODE"
+          test "$CODE" = "1"
